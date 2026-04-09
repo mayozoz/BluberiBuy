@@ -29,7 +29,7 @@ Works on **SSENSE** and **The RealReal** out of the box, and is built to be exte
 ## Project structure
 
 ```
-price-thread/
+Blueberry/
 ├── manifest.json               # Extension config (Manifest V3)
 ├── popup/
 │   ├── popup.html              # Extension popup UI
