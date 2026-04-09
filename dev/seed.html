@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>PriceThread — Dev Seed</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0f0f0f; --card: #1a1a1a; --border: #2a2a2a;
+      --text: #e8e8e8; --muted: #888; --green: #22c55e;
+      --yellow: #f59e0b; --red: #ef4444; --accent: #a78bfa;
+    }
+    body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; padding: 24px; max-width: 540px; }
+    h1 { font-size: 18px; font-weight: 700; margin-bottom: 4px; }
+    .subtitle { color: var(--muted); font-size: 12px; margin-bottom: 24px; }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-bottom: 14px; }
+    .card h2 { font-size: 13px; font-weight: 700; margin-bottom: 4px; display: flex; align-items: center; gap: 8px; }
+    .card p { font-size: 12px; color: var(--muted); line-height: 1.5; }
+    .badge { font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 99px; }
+    .badge--wait { background: #f59e0b22; color: var(--yellow); }
+    .badge--buy  { background: #22c55e22; color: var(--green); }
+    .badge--hold { background: #ffffff11; color: var(--muted); }
+    .badge--restock { background: #a78bfa22; color: var(--accent); }
+    .actions { display: flex; gap: 10px; margin-top: 24px; }
+    button {
+      flex: 1; padding: 10px 0; border: none; border-radius: 8px; font-size: 13px;
+      font-weight: 600; cursor: pointer; transition: opacity .15s;
+    }
+    button:hover { opacity: .85; }
+    #btn-seed  { background: var(--accent); color: #fff; }
+    #btn-clear { background: var(--card); border: 1px solid var(--border); color: var(--text); }
+    #status {
+      margin-top: 14px; padding: 10px 14px; border-radius: 8px;
+      font-size: 12px; font-weight: 600; display: none;
+    }
+    .status--ok  { background: #22c55e22; border: 1px solid #22c55e44; color: var(--green); }
+    .status--err { background: #ef444422; border: 1px solid #ef444444; color: var(--red); }
+    hr { border: none; border-top: 1px solid var(--border); margin: 20px 0; }
+    .note { font-size: 11px; color: var(--muted); line-height: 1.6; }
+  </style>
+</head>
+<body>
+  <h1>🧪 PriceThread Dev Seed</h1>
+  <p class="subtitle">Injects three test items so you can preview the chart and verdict badge right away.</p>
+
+  <div class="card">
+    <h2>🟡 Item 1 — SSENSE <span class="badge badge--wait">expect: Wait</span></h2>
+    <p>Bottega Veneta Mini Jodie — MSRP $1,850.<br>
+    Price dropped 4× in the last 30 days ($849 → $799 → $749 → $699 → $649).
+    Regression slope is clearly downward. Signal: still falling.</p>
+  </div>
+
+  <div class="card">
+    <h2>🟢 Item 2 — The RealReal <span class="badge badge--buy">expect: Buy now</span></h2>
+    <p>Totême Scarf Coat — MSRP $1,290.<br>
+    Tracked for 5 weeks; currently at its all-time low ($399), 69% off MSRP.
+    Inventory just turned "low" (consignment → strong urgency signal).</p>
+  </div>
+
+  <div class="card">
+    <h2>⚪ Item 3 — SSENSE <span class="badge badge--restock">restock marker</span> <span class="badge badge--hold">expect: Hold</span></h2>
+    <p>Acne Studios Wool Scarf — MSRP $295.<br>
+    Previous episode: $195 → $165 → sold out.<br>
+    Relisted + restock marker visible as a ↺ dotted break in the chart.<br>
+    Current episode: $185 → $185 (flat, only 2 points — low confidence).</p>
+  </div>
+
+  <hr />
+  <p class="note">
+    After seeding, open the extension popup and switch to the <strong>Tracked</strong> tab
+    to see all three items. Click any item row to open its product page placeholder.
+    Switch back to <strong>This item</strong> on a supported SSENSE/TRR page — the test
+    items live alongside real tracked items and will not interfere.
+  </p>
+
+  <div class="actions">
+    <button id="btn-seed">⬇ Seed test data</button>
+    <button id="btn-clear">✕ Remove test items</button>
+  </div>
+  <div id="status"></div>
+
+  <script type="module" src="seed.js"></script>
+</body>
+</html>
