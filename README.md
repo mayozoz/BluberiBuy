@@ -1,4 +1,4 @@
-# 🧵 PriceThread
+# 🧵 Blueberry
 
 A personal Chrome extension for tracking price history on luxury fashion items.
 Works on **SSENSE** and **The RealReal** out of the box, and is built to be extended.
