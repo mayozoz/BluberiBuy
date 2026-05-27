@@ -17,7 +17,7 @@ Works on **SSENSE** and **The RealReal** out of the box, and is built to be exte
 - Pause tracking without losing history
 - SPA-aware — works on React-based sites that don't do full page reloads
 
-## Planned (Phase 2)
+## Planned (Phase 2 - still working on this)
 
 - Email notifications via serverless backend (Firebase Functions / Supabase Edge)
 - Cross-device sync (Firebase / Supabase storage)
