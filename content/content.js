@@ -123,6 +123,9 @@ const ORIGINAL_PRICE_SELECTORS = [
  */
 function extractFromJsonLd() {
   const scripts = document.querySelectorAll('script[type="application/ld+json"]');
+  const pagePath = window.location.pathname.replace(/\/$/, '');
+  let fallback = null;
+
   for (const script of scripts) {
     let parsed;
     try { parsed = JSON.parse(script.textContent); } catch { continue; }
@@ -158,7 +161,7 @@ function extractFromJsonLd() {
         if (hp > price) originalPrice = hp;
       }
 
-      return {
+      const result = {
         name:          node.name || '',
         brand:         node.brand?.name || '',
         price,
@@ -167,9 +170,16 @@ function extractFromJsonLd() {
         image:         (Array.isArray(node.image) ? node.image[0] : node.image) || '',
         inventory,
       };
+
+      // Prefer the node whose URL matches this page — avoids picking up
+      // JSON-LD injected for recommended/related products on the same page.
+      const nodeUrl = (node.url || node['@id'] || offer?.url || '').replace(/\/$/, '');
+      if (nodeUrl && nodeUrl.includes(pagePath)) return result;
+
+      if (!fallback) fallback = result;
     }
   }
-  return null;
+  return fallback;
 }
 
 /**
