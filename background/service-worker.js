@@ -1,5 +1,5 @@
 /**
- * service-worker.js — PriceThread background service worker (MV3)
+ * service-worker.js — BluberiBuy background service worker (MV3)
  *
  * Responsibilities:
  *   1. Set up a recurring alarm to background-check all tracked item prices
@@ -30,7 +30,7 @@ import {
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
-const ALARM_NAME    = 'pricethread_check';
+const ALARM_NAME    = 'bluberiBuy_check';
 const ICON_PATH     = '/icons/icon48.png';
 
 // Minimum drop percentage to trigger a notification.
@@ -40,7 +40,7 @@ const MIN_DROP_PCT  = 0.05; // 5%
 // ─── Installation / startup ───────────────────────────────────────────────────
 
 chrome.runtime.onInstalled.addListener(async ({ reason }) => {
-  console.log('[PriceThread] onInstalled:', reason);
+  console.log('[BluberiBuy] onInstalled:', reason);
   const settings = await getSettings();
   scheduleAlarm(settings.checkIntervalHours);
 });
@@ -59,13 +59,13 @@ function scheduleAlarm(intervalHours) {
       delayInMinutes:  intervalHours * 60,   // first run after one interval
       periodInMinutes: intervalHours * 60,   // repeat
     });
-    console.log(`[PriceThread] Alarm scheduled every ${intervalHours}h`);
+    console.log(`[BluberiBuy] Alarm scheduled every ${intervalHours}h`);
   });
 }
 
 chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name !== ALARM_NAME) return;
-  console.log('[PriceThread] Running scheduled price check');
+  console.log('[BluberiBuy] Running scheduled price check');
   await checkAllPrices();
 });
 
@@ -76,13 +76,13 @@ async function checkAllPrices() {
   const settings = await getSettings();
   const active   = Object.values(items).filter(item => item.isActive);
 
-  console.log(`[PriceThread] Checking ${active.length} active items`);
+  console.log(`[BluberiBuy] Checking ${active.length} active items`);
 
   for (const item of active) {
     try {
       await checkItemPrice(item, settings);
     } catch (err) {
-      console.warn(`[PriceThread] Failed to check "${item.name}":`, err.message);
+      console.warn(`[BluberiBuy] Failed to check "${item.name}":`, err.message);
     }
   }
 }
@@ -104,7 +104,7 @@ async function checkItemPrice(item, settings) {
   });
 
   if (!response.ok) {
-    console.warn(`[PriceThread] HTTP ${response.status} for ${item.url}`);
+    console.warn(`[BluberiBuy] HTTP ${response.status} for ${item.url}`);
     return;
   }
 
@@ -113,7 +113,7 @@ async function checkItemPrice(item, settings) {
   const { price, inventory } = parseFromHtml(html);
 
   if (!price) {
-    console.warn(`[PriceThread] Could not parse price from ${item.url}`);
+    console.warn(`[BluberiBuy] Could not parse price from ${item.url}`);
     return;
   }
 
@@ -126,10 +126,10 @@ async function checkItemPrice(item, settings) {
   if (dropped && prevPrice !== newPrice) {
     const dropPct = (prevPrice - newPrice) / prevPrice;
     if (dropPct >= MIN_DROP_PCT) {
-      console.log(`[PriceThread] Price drop on "${item.name}": ${prevPrice} → ${newPrice} (${Math.round(dropPct * 100)}%)`);
+      console.log(`[BluberiBuy] Price drop on "${item.name}": ${prevPrice} → ${newPrice} (${Math.round(dropPct * 100)}%)`);
       await notifyPriceDrop(item, prevPrice, newPrice, settings);
     } else {
-      console.log(`[PriceThread] Drop on "${item.name}" too small to notify (${Math.round(dropPct * 100)}% < ${MIN_DROP_PCT * 100}%)`);
+      console.log(`[BluberiBuy] Drop on "${item.name}" too small to notify (${Math.round(dropPct * 100)}% < ${MIN_DROP_PCT * 100}%)`);
     }
   }
 
@@ -138,6 +138,14 @@ async function checkItemPrice(item, settings) {
   if (inventory !== prevInventory &&
       (inventory === 'low' || inventory === 'out_of_stock' || inventory === 'sold')) {
     await notifyInventoryChange(item, inventory, settings);
+  }
+
+  // ── Notify: target price reached ──
+  const freshItem = await getItem(item.id);
+  if (freshItem?.targetPrice != null &&
+      newPrice <= freshItem.targetPrice &&
+      prevPrice > freshItem.targetPrice) {
+    await notifyTargetPrice(freshItem, newPrice, settings);
   }
 }
 
@@ -237,6 +245,18 @@ async function notifyInventoryChange(item, inventory, settings) {
   // Phase 2: email stub (same pattern as above)
 }
 
+async function notifyTargetPrice(item, newPrice, settings) {
+  if (!settings.browserNotifications) return;
+
+  chrome.notifications.create(`target_${item.id}_${Date.now()}`, {
+    type:    'basic',
+    iconUrl: ICON_PATH,
+    title:   `Target price reached: ${item.brand || item.name}`,
+    message: `${item.siteName}: now ${fmtPrice(newPrice, item.currency)} — your target was ${fmtPrice(item.targetPrice, item.currency)}`,
+    buttons: [{ title: 'View item' }],
+  });
+}
+
 // Open the item's page when the user clicks "View item" in a notification
 chrome.notifications.onButtonClicked.addListener(async (notifId, btnIdx) => {
   if (btnIdx !== 0) return;
@@ -264,6 +284,24 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       scheduleAlarm(message.intervalHours);
       sendResponse({ success: true });
       break;
+
+    // Popup requested an immediate price check for a single item
+    case 'REFRESH_ITEM': {
+      const { itemId } = message;
+      if (!itemId) { sendResponse({ success: false, error: 'no itemId' }); break; }
+
+      getItem(itemId).then(async (item) => {
+        if (!item) { sendResponse({ success: false, error: 'not tracked' }); return; }
+        const settings = await getSettings();
+        try {
+          await checkItemPrice(item, settings);
+          sendResponse({ success: true });
+        } catch (err) {
+          sendResponse({ success: false, error: err.message });
+        }
+      });
+      break;
+    }
 
     // Content script pushed a live price update (user just visited the page)
     case 'PAGE_PRICE_UPDATE': {

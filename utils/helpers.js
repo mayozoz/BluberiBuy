@@ -1,5 +1,5 @@
 /**
- * helpers.js — Shared utility functions for PriceThread
+ * helpers.js — Shared utility functions for BluberiBuy
  * No Chrome APIs used here — safe to import from any context.
  */
 
@@ -270,7 +270,7 @@ export function drawSparkline(canvas, history, opts = {}) {
   ctx.fillStyle  = '#22c55e';
   ctx.font       = 'bold 9px -apple-system, sans-serif';
   ctx.textAlign  = lowIdx < prices.length * 0.8 ? 'center' : 'right';
-  ctx.fillText(`$${lowPrice}`, lowX, labelY);
+  ctx.fillText(formatPrice(lowPrice, opts.currency || 'USD'), lowX, labelY);
 
   // ── Current price dot (right end of line) ────────────────────────────────────
   const lastX = toX(prices.length - 1);

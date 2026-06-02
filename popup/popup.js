@@ -1,22 +1,13 @@
 /**
- * popup.js — PriceThread popup controller
- *
- * Loaded as an ES module (type="module" in popup.html).
- * Imports from utils/ using relative paths — no bundler needed.
- *
- * Flow:
- *  1. Get the active tab's URL
- *  2. If it matches a supported site, ask the content script for product data
- *  3. Check chrome.storage to see if the item is already tracked
- *  4. Render the appropriate UI state
- *  5. Handle track / untrack / notifications / settings interactions
+ * popup.js — BluberiBuy popup controller
  */
 
 import {
   getSettings, saveSettings,
-  getAllItems,  getItem, isTracked,
+  getAllItems, getItem, isTracked,
   addItem, removeItem, recordPrice,
   updateItemNotifications,
+  setTargetPrice,
   getFolders, addFolder, renameFolder, removeFolder, setItemFolder,
 } from '../utils/storage.js';
 
@@ -27,14 +18,13 @@ import {
 
 import { analyzePriceTrend } from '../utils/heuristic.js';
 
-// ─── Supported sites (must mirror manifest.json host_permissions) ─────────────
+// ─── Supported sites ──────────────────────────────────────────────────────────
 
-const SUPPORTED_HOSTS = ['ssense.com', 'therealreal.com'];
+const SUPPORTED_HOSTS = ['ssense.com', 'therealreal.com', 'fashionphile.com'];
 
 function isSupportedUrl(url) {
-  try {
-    return SUPPORTED_HOSTS.some(h => new URL(url).hostname.includes(h));
-  } catch { return false; }
+  try { return SUPPORTED_HOSTS.some(h => new URL(url).hostname.includes(h)); }
+  catch { return false; }
 }
 
 // ─── DOM refs ─────────────────────────────────────────────────────────────────
@@ -55,10 +45,8 @@ tabs.forEach(tab => {
   tab.addEventListener('click', () => {
     tabs.forEach(t => t.classList.remove('tab--active'));
     tab.classList.add('tab--active');
-
     document.querySelectorAll('.panel').forEach(p => p.classList.add('hidden'));
     $(`panel-${tab.dataset.tab}`).classList.remove('hidden');
-
     if (tab.dataset.tab === 'tracked') renderTrackedList();
   });
 });
@@ -79,15 +67,9 @@ $('btn-save-settings').addEventListener('click', async () => {
   const intervalHours = parseInt($('setting-interval').value, 10);
   const browserNotif  = $('setting-browser-notif').checked;
 
-  await saveSettings({
-    checkIntervalHours:   intervalHours,
-    browserNotifications: browserNotif,
-  });
-
-  // Tell the service worker to reschedule the alarm
+  await saveSettings({ checkIntervalHours: intervalHours, browserNotifications: browserNotif });
   chrome.runtime.sendMessage({ type: 'UPDATE_CHECK_INTERVAL', intervalHours });
 
-  // Flash "Saved"
   const saved = $('settings-saved');
   saved.classList.remove('hidden');
   setTimeout(() => saved.classList.add('hidden'), 1800);
@@ -95,12 +77,12 @@ $('btn-save-settings').addEventListener('click', async () => {
 
 async function loadSettingsIntoForm() {
   const s = await getSettings();
-  $('setting-interval').value          = String(s.checkIntervalHours);
-  $('setting-browser-notif').checked   = s.browserNotifications;
-  $('setting-email').value             = s.emailAddress || '';
+  $('setting-interval').value        = String(s.checkIntervalHours);
+  $('setting-browser-notif').checked = s.browserNotifications;
+  $('setting-email').value           = s.emailAddress || '';
 }
 
-// ─── Show / hide state helpers ────────────────────────────────────────────────
+// ─── State helpers ────────────────────────────────────────────────────────────
 
 function showState(name) {
   Object.entries(states).forEach(([key, el]) => {
@@ -110,25 +92,19 @@ function showState(name) {
 
 // ─── Current item tab ─────────────────────────────────────────────────────────
 
-let currentProductData = null; // product data from content script
+let currentProductData = null;
 let currentItemId      = null;
 
 async function initCurrentTab() {
   showState('loading');
 
-  // Get the active tab
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab?.url || !isSupportedUrl(tab.url)) {
-    showState('unsupported');
-    return;
-  }
+  if (!tab?.url || !isSupportedUrl(tab.url)) { showState('unsupported'); return; }
 
-  // Ask the content script for product data
   let response;
   try {
     response = await chrome.tabs.sendMessage(tab.id, { type: 'GET_PRODUCT_DATA' });
-  } catch (err) {
-    // Content script might not be injected yet (e.g., extension just installed)
+  } catch {
     showState('error');
     $('state-error-msg').textContent = 'Reload the product page and try again.';
     return;
@@ -148,20 +124,22 @@ async function initCurrentTab() {
 }
 
 async function renderProductView(product) {
-  // Product card
   const img = $('product-img');
-  img.src = product.image || '';
-  img.alt = product.name;
-  img.onerror = () => { img.style.display = 'none'; };
+  img.src   = product.image || '';
+  img.alt   = product.name;
+  img.onerror = () => {
+    const ph = document.createElement('div');
+    ph.className   = 'product-card__hero img-placeholder';
+    ph.textContent = (product.brand || product.name || '?').charAt(0).toUpperCase();
+    img.replaceWith(ph);
+  };
 
   $('product-brand').textContent = product.brand || '';
   $('product-name').textContent  = product.name;
   $('product-site').textContent  = product.siteName;
 
-  // Current price
   $('price-current').textContent = formatPrice(product.price, product.currency);
 
-  // MSRP + discount (shown even before tracking, straight from the page)
   const origEl     = $('price-original');
   const discountEl = $('price-discount');
   if (product.originalPrice && product.originalPrice > product.price) {
@@ -174,19 +152,17 @@ async function renderProductView(product) {
     discountEl.classList.add('hidden');
   }
 
-  // Inventory badge
   const { text: invText, color: invColor } = getInventoryLabel(product.inventory);
   const invBadge = $('inventory-badge');
   if (invText) {
-    invBadge.textContent  = invText;
-    invBadge.style.background = invColor + '22';
-    invBadge.style.color      = invColor;
+    invBadge.textContent           = invText;
+    invBadge.style.background      = invColor + '22';
+    invBadge.style.color           = invColor;
     invBadge.classList.remove('hidden');
   } else {
     invBadge.classList.add('hidden');
   }
 
-  // Check if already tracked and render watermarks / sparkline / button
   await refreshTrackingUI();
 }
 
@@ -196,52 +172,44 @@ async function refreshTrackingUI() {
   let item = await getItem(currentItemId);
   const tracked = item !== null;
 
-  // If the live page shows a price we haven't recorded yet, persist it now.
-  // This keeps the watermarks, chart, and check-count in sync whenever the
-  // popup is opened on a tracked product page.
   if (tracked && currentProductData && currentProductData.price !== item.currentPrice) {
-    await recordPrice(
-      currentItemId,
-      currentProductData.price,
-      currentProductData.inventory || item.inventory,
-    );
-    item = await getItem(currentItemId); // re-fetch with updated watermarks + history
+    await recordPrice(currentItemId, currentProductData.price, currentProductData.inventory || item.inventory);
+    item = await getItem(currentItemId);
   }
-  const btn     = $('btn-track');
+
+  const btn = $('btn-track');
 
   if (tracked) {
     btn.textContent = '✓  Tracking';
     btn.className   = 'btn btn--tracking';
 
-    // Watermarks
     $('wm-high').textContent   = formatPrice(item.highPrice, item.currency);
-    $('wm-low').textContent    = formatPrice(item.lowPrice, item.currency);
+    $('wm-low').textContent    = formatPrice(item.lowPrice,  item.currency);
     $('wm-checks').textContent = item.priceHistory.filter(h => h.type !== 'restock').length;
     $('watermarks').classList.remove('hidden');
 
-    // Sparkline — pass originalPrice so it draws the MSRP reference line
     const priceEntries = item.priceHistory.filter(h => h.type !== 'restock');
     if (priceEntries.length >= 2) {
       $('chart-wrap').classList.remove('hidden');
       drawSparkline($('sparkline'), item.priceHistory, {
         originalPrice: item.originalPrice || null,
+        currency:      item.currency,
       });
     }
 
-    // Verdict badge — show once we have at least 2 real price entries
     const verdictEl = $('verdict-badge');
     if (priceEntries.length >= 2) {
       const { verdict, reason, confidence } = analyzePriceTrend(item);
-      const ICONS   = { buy: '🟢', wait: '🟡', hold: '⚪' };
-      const LABELS  = { buy: 'Buy now',  wait: 'Wait a bit', hold: 'Hold steady' };
-      const DOTS    = { high: '●●●', medium: '●●○', low: '●○○' };
+      const ICONS  = { buy: '🟢', wait: '🟡', hold: '⚪' };
+      const LABELS = { buy: 'Buy now', wait: 'Wait a bit', hold: 'Hold steady' };
+      const DOTS   = { high: '●●●', medium: '●●○', low: '●○○' };
 
-      verdictEl.className = `verdict verdict--${verdict}`;
-      $('verdict-icon').textContent  = ICONS[verdict];
-      $('verdict-label').textContent = LABELS[verdict];
+      verdictEl.className             = `verdict verdict--${verdict}`;
+      $('verdict-icon').textContent   = ICONS[verdict];
+      $('verdict-label').textContent  = LABELS[verdict];
       $('verdict-reason').textContent = reason;
-      $('verdict-conf').textContent  = DOTS[confidence] ?? '';
-      $('verdict-conf').title = `Confidence: ${confidence}`;
+      $('verdict-conf').textContent   = DOTS[confidence] ?? '';
+      $('verdict-conf').title         = `Confidence: ${confidence}`;
     } else {
       verdictEl.className = 'verdict hidden';
     }
@@ -250,10 +218,23 @@ async function refreshTrackingUI() {
     $('notif-settings').classList.remove('hidden');
     $('toggle-browser').checked = item.notifications?.browser ?? true;
     $('toggle-email').checked   = item.notifications?.email   ?? false;
-
     $('toggle-browser').onchange = async (e) => {
       await updateItemNotifications(currentItemId, { browser: e.target.checked });
     };
+
+    // Target price
+    const targetInput = $('target-price');
+    targetInput.value = item.targetPrice != null ? String(item.targetPrice) : '';
+    targetInput.onchange = async () => {
+      const val = targetInput.value.trim();
+      const price = val === '' ? null : parseFloat(val);
+      await setTargetPrice(currentItemId, isNaN(price) ? null : price);
+    };
+
+    // Last-checked timestamp
+    $('refresh-ts').textContent = item.lastChecked
+      ? `Updated ${formatTimestamp(item.lastChecked)}`
+      : '';
 
   } else {
     btn.textContent = 'Track this item';
@@ -265,9 +246,11 @@ async function refreshTrackingUI() {
   }
 }
 
-// Track / Untrack button
+// Track / Untrack
 $('btn-track').addEventListener('click', async () => {
   if (!currentProductData) return;
+  const btn     = $('btn-track');
+  btn.disabled  = true;
 
   const tracked = await isTracked(currentItemId);
   if (tracked) {
@@ -276,52 +259,132 @@ $('btn-track').addEventListener('click', async () => {
     await addItem(currentProductData);
   }
 
+  btn.disabled = false;
   await refreshTrackingUI();
   updateTrackedBadge();
 });
 
-// ─── Tracked items tab — folder view ─────────────────────────────────────────
+// Manual refresh
+$('btn-refresh').addEventListener('click', async () => {
+  if (!currentItemId) return;
+  const refreshBtn = $('btn-refresh');
+  refreshBtn.classList.add('spinning');
+  refreshBtn.disabled = true;
 
-// Drag state
+  try {
+    await new Promise((resolve, reject) => {
+      chrome.runtime.sendMessage(
+        { type: 'REFRESH_ITEM', itemId: currentItemId },
+        (res) => res?.success ? resolve() : reject(new Error(res?.error || 'failed'))
+      );
+    });
+    await refreshTrackingUI();
+  } catch {
+    // Silently ignore — UI stays current from last known state
+  }
+
+  refreshBtn.classList.remove('spinning');
+  refreshBtn.disabled = false;
+});
+
+// ─── Tracked items tab ────────────────────────────────────────────────────────
+
 let dragItemId   = null;
-let dragSourceId = null; // folder the item came from
+let dragSourceId = null;
 
 async function renderTrackedList() {
-  const [items, folders] = await Promise.all([getAllItems(), getFolders()]);
+  const [allItems, folders] = await Promise.all([getAllItems(), getFolders()]);
   const container = $('folder-list');
   const empty     = $('tracked-empty');
-  const itemArr   = Object.values(items);
 
   container.innerHTML = '';
 
+  // Sort & filter
+  const sortBy      = $('sort-select').value;
+  const inStockOnly = $('filter-instock').checked;
+
+  let itemArr = Object.values(allItems);
+  if (inStockOnly) {
+    itemArr = itemArr.filter(i => i.inventory === 'in_stock' || i.inventory === 'low');
+  }
+  itemArr = sortItems(itemArr, sortBy);
+
   if (itemArr.length === 0) {
     empty.classList.remove('hidden');
+    $('summary-bar').classList.add('hidden');
     return;
   }
   empty.classList.add('hidden');
 
-  // Sort folders by order, then render each
+  // Summary bar
+  renderSummaryBar(Object.values(allItems));
+
+  // Build an id→item map from the sorted+filtered array so folder rendering respects the sort
+  const sortedIds = itemArr.map(i => i.id);
+
   const folderArr = Object.values(folders).sort((a, b) => a.order - b.order);
-
   for (const folder of folderArr) {
-    // Items belonging to this folder (migrate old items with no folderId to site folder)
-    const folderItems = itemArr
-      .filter(item => (item.folderId || item.site) === folder.id)
-      .sort((a, b) => b.addedAt - a.addedAt);
+    const folderItems = sortedIds
+      .map(id => allItems[id])
+      .filter(item => item && (item.folderId || item.site) === folder.id);
 
-    // Skip default folders that have no items (keep UI clean)
     if (folder.isDefault && folderItems.length === 0) continue;
-
     container.appendChild(buildFolderSection(folder, folderItems, folders));
   }
 }
 
+function sortItems(items, by) {
+  return [...items].sort((a, b) => {
+    switch (by) {
+      case 'drop': {
+        const dropA = a.originalPrice ? (a.originalPrice - a.currentPrice) / a.originalPrice
+          : (a.priceHistory[0]?.price - a.currentPrice) / (a.priceHistory[0]?.price || 1);
+        const dropB = b.originalPrice ? (b.originalPrice - b.currentPrice) / b.originalPrice
+          : (b.priceHistory[0]?.price - b.currentPrice) / (b.priceHistory[0]?.price || 1);
+        return dropB - dropA;
+      }
+      case 'updated':
+        return (b.lastChecked || 0) - (a.lastChecked || 0);
+      case 'price-asc':
+        return a.currentPrice - b.currentPrice;
+      default: // 'added'
+        return (b.addedAt || 0) - (a.addedAt || 0);
+    }
+  });
+}
+
+function renderSummaryBar(items) {
+  const bar      = $('summary-bar');
+  const countEl  = $('summary-count');
+  const savingsEl= $('summary-savings');
+
+  bar.classList.remove('hidden');
+  countEl.textContent = `${items.length} item${items.length !== 1 ? 's' : ''} tracked`;
+
+  const totalSavings = items.reduce((sum, item) => {
+    if (item.originalPrice && item.originalPrice > item.currentPrice) {
+      return sum + (item.originalPrice - item.currentPrice);
+    }
+    return sum;
+  }, 0);
+
+  if (totalSavings > 0) {
+    savingsEl.textContent = `${formatPrice(totalSavings, 'USD')} off MSRP`;
+    savingsEl.classList.remove('hidden');
+  } else {
+    savingsEl.classList.add('hidden');
+  }
+}
+
+// Sort/filter change listeners
+$('sort-select').addEventListener('change', renderTrackedList);
+$('filter-instock').addEventListener('change', renderTrackedList);
+
 function buildFolderSection(folder, folderItems, allFolders) {
   const section = document.createElement('div');
-  section.className = 'folder-section';
+  section.className        = 'folder-section';
   section.dataset.folderId = folder.id;
 
-  // ── Header ──────────────────────────────────────────────────────────────────
   const header = document.createElement('div');
   header.className = 'folder-header';
   header.innerHTML = `
@@ -330,59 +393,49 @@ function buildFolderSection(folder, folderItems, allFolders) {
     <span class="folder-header__count">${folderItems.length}</span>
     <div class="folder-header__actions">
       <button class="folder-action-btn" data-action="rename" title="Rename">✎</button>
-      ${!folder.isDefault ? `<button class="folder-action-btn folder-action-btn--delete" data-action="delete" title="Delete folder">✕</button>` : ''}
+      ${!folder.isDefault ? `<button class="folder-action-btn folder-action-btn--delete" data-action="delete" title="Delete">✕</button>` : ''}
     </div>
   `;
 
-  // Toggle collapse
   header.addEventListener('click', (e) => {
-    if (e.target.dataset.action) return; // let action buttons handle their own clicks
+    if (e.target.dataset.action) return;
     section.classList.toggle('folder-section--collapsed');
   });
 
-  // Rename
   header.querySelector('[data-action="rename"]')?.addEventListener('click', (e) => {
     e.stopPropagation();
     startRename(header, folder);
   });
 
-  // Delete folder — two-step to prevent accidental deletion
-  // (window.confirm is blocked in MV3 extension popups)
   const deleteBtn = header.querySelector('[data-action="delete"]');
   if (deleteBtn) {
     deleteBtn.addEventListener('click', async (e) => {
       e.stopPropagation();
       if (deleteBtn.dataset.confirming === 'true') {
-        // Second click — confirmed, do the delete
         await removeFolder(folder.id);
         await renderTrackedList();
         updateTrackedBadge();
       } else {
-        // First click — ask for confirmation inline
         deleteBtn.dataset.confirming = 'true';
-        deleteBtn.textContent = 'Sure?';
-        deleteBtn.style.color = 'var(--red)';
-        // Auto-reset if user doesn't confirm within 2.5 seconds
+        deleteBtn.textContent        = 'Sure?';
+        deleteBtn.style.color        = 'var(--red)';
         setTimeout(() => {
           if (deleteBtn.dataset.confirming === 'true') {
             deleteBtn.dataset.confirming = 'false';
-            deleteBtn.textContent = '✕';
-            deleteBtn.style.color = '';
+            deleteBtn.textContent        = '✕';
+            deleteBtn.style.color        = '';
           }
         }, 2500);
       }
     });
   }
 
-  // ── Drag-over on header = drop into this folder ──────────────────────────────
   section.addEventListener('dragover', (e) => {
     e.preventDefault();
     section.classList.add('folder-section--drag-over');
   });
   section.addEventListener('dragleave', (e) => {
-    if (!section.contains(e.relatedTarget)) {
-      section.classList.remove('folder-section--drag-over');
-    }
+    if (!section.contains(e.relatedTarget)) section.classList.remove('folder-section--drag-over');
   });
   section.addEventListener('drop', async (e) => {
     e.preventDefault();
@@ -392,18 +445,17 @@ function buildFolderSection(folder, folderItems, allFolders) {
     await renderTrackedList();
   });
 
-  // ── Body ─────────────────────────────────────────────────────────────────────
   const body = document.createElement('div');
   body.className = 'folder-body';
 
   if (folderItems.length === 0) {
     const empty = document.createElement('div');
-    empty.className = 'folder-empty';
+    empty.className   = 'folder-empty';
     empty.textContent = 'Drop items here';
     body.appendChild(empty);
   } else {
     for (const item of folderItems) {
-      body.appendChild(buildItemRow(item, folder.id));
+      body.appendChild(buildItemCard(item, folder.id));
     }
   }
 
@@ -412,87 +464,101 @@ function buildFolderSection(folder, folderItems, allFolders) {
   return section;
 }
 
-function buildItemRow(item, folderId) {
-  const row = document.createElement('div');
-  row.className = 'item-row';
-  row.draggable = true;
-  row.dataset.itemId = item.id;
+function buildItemCard(item, folderId) {
+  const card = document.createElement('div');
+  card.className      = 'item-card';
+  card.draggable      = true;
+  card.dataset.itemId = item.id;
 
-  // Delta label
-  const history    = item.priceHistory;
-  const firstPrice = history[0]?.price ?? item.currentPrice;
+  // Inventory dot
+  const dot = document.createElement('div');
+  dot.className = `item-card__inv-dot item-card__inv-dot--${item.inventory}`;
+  card.appendChild(dot);
+
+  // Image
+  const img = document.createElement('img');
+  img.className = 'item-card__img';
+  img.src       = item.image || '';
+  img.alt       = item.name;
+  img.onerror   = () => {
+    const ph = document.createElement('div');
+    ph.className   = 'item-card__img img-placeholder';
+    ph.textContent = (item.brand || item.name || '?').charAt(0).toUpperCase();
+    img.replaceWith(ph);
+  };
+  card.appendChild(img);
+
+  // Hover overlay
+  const overlay = document.createElement('div');
+  overlay.className = 'item-card__overlay';
+
+  const firstPrice = item.priceHistory[0]?.price ?? item.currentPrice;
   const delta      = item.currentPrice - firstPrice;
-  let deltaClass   = 'item-row__delta--same';
-  let deltaText    = '';
-
+  let deltaHtml    = '';
   if (item.originalPrice && item.originalPrice > item.currentPrice) {
-    deltaClass = 'item-row__delta--drop';
-    deltaText  = formatDiscount(item.originalPrice, item.currentPrice);
+    deltaHtml = `<span class="item-card__delta item-card__delta--drop">${formatDiscount(item.originalPrice, item.currentPrice)}</span>`;
   } else if (delta < 0) {
-    deltaClass = 'item-row__delta--drop';
-    deltaText  = `↓ ${formatPrice(Math.abs(delta), item.currency)}`;
+    deltaHtml = `<span class="item-card__delta item-card__delta--drop">↓ ${formatPrice(Math.abs(delta), item.currency)}</span>`;
   } else if (delta > 0) {
-    deltaClass = 'item-row__delta--rise';
-    deltaText  = `↑ ${formatPrice(delta, item.currency)}`;
+    deltaHtml = `<span class="item-card__delta item-card__delta--rise">↑ ${formatPrice(delta, item.currency)}</span>`;
   }
 
-  row.innerHTML = `
-    <span class="item-row__drag" title="Drag to move">⠿</span>
-    <img class="item-row__img" src="${escHtml(item.image)}" alt="${escHtml(item.name)}"
-         onerror="this.style.display='none'" />
-    <div class="item-row__body">
-      <div class="item-row__brand">${escHtml(item.brand || item.siteName)}</div>
-      <div class="item-row__name">${escHtml(item.name)}</div>
-      <div class="item-row__price-wrap">
-        <span class="item-row__price">${formatPrice(item.currentPrice, item.currency)}</span>
-        ${deltaText ? `<span class="item-row__delta ${deltaClass}">${deltaText}</span>` : ''}
-      </div>
+  overlay.innerHTML = `
+    <div class="item-card__brand">${escHtml(item.brand || item.siteName)}</div>
+    <div class="item-card__name">${escHtml(item.name)}</div>
+    <div class="item-card__price-row">
+      <span class="item-card__price">${formatPrice(item.currentPrice, item.currency)}</span>
+      ${deltaHtml}
     </div>
-    <button class="item-row__remove" title="Stop tracking" aria-label="Remove">✕</button>
   `;
+  card.appendChild(overlay);
 
-  // Open product page on body click
-  row.querySelector('.item-row__body').addEventListener('click', () => {
+  // Remove button
+  const removeBtn = document.createElement('button');
+  removeBtn.className    = 'item-card__remove';
+  removeBtn.title        = 'Stop tracking';
+  removeBtn.textContent  = '✕';
+  removeBtn.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    await removeItem(item.id);
+    card.remove();
+    updateTrackedBadge();
+    await renderTrackedList();
+  });
+  card.appendChild(removeBtn);
+
+  // Open product page on click (not on remove)
+  card.addEventListener('click', (e) => {
+    if (e.target === removeBtn) return;
     chrome.tabs.create({ url: item.url });
   });
 
-  // Remove
-  row.querySelector('.item-row__remove').addEventListener('click', async (e) => {
-    e.stopPropagation();
-    await removeItem(item.id);
-    row.remove();
-    updateTrackedBadge();
-    // Re-render to clean up empty folder sections
-    await renderTrackedList();
-  });
-
-  // Drag source events
-  row.addEventListener('dragstart', (e) => {
+  // Drag
+  card.addEventListener('dragstart', (e) => {
     dragItemId   = item.id;
     dragSourceId = folderId;
-    row.classList.add('dragging');
+    card.classList.add('dragging');
     e.dataTransfer.effectAllowed = 'move';
   });
-  row.addEventListener('dragend', () => {
+  card.addEventListener('dragend', () => {
     dragItemId   = null;
     dragSourceId = null;
-    row.classList.remove('dragging');
-    // Clean up any leftover drag-over states
+    card.classList.remove('dragging');
     document.querySelectorAll('.folder-section--drag-over')
       .forEach(el => el.classList.remove('folder-section--drag-over'));
   });
 
-  return row;
+  return card;
 }
 
-// ── Inline folder rename ──────────────────────────────────────────────────────
+// ─── Inline folder rename ─────────────────────────────────────────────────────
 
 function startRename(header, folder) {
   const nameEl = header.querySelector('.folder-header__name');
   const input  = document.createElement('input');
-  input.className   = 'folder-header__rename';
-  input.value       = folder.name;
-  input.maxLength   = 40;
+  input.className = 'folder-header__rename';
+  input.value     = folder.name;
+  input.maxLength = 40;
   nameEl.replaceWith(input);
   input.focus();
   input.select();
@@ -502,28 +568,23 @@ function startRename(header, folder) {
     await renameFolder(folder.id, newName);
     await renderTrackedList();
   };
-
-  input.addEventListener('blur',    commit);
+  input.addEventListener('blur', commit);
   input.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter')  { input.blur(); }
+    if (e.key === 'Enter')  input.blur();
     if (e.key === 'Escape') { input.value = folder.name; input.blur(); }
   });
 }
 
-// ── Add folder button ─────────────────────────────────────────────────────────
+// ─── Add folder button ────────────────────────────────────────────────────────
 
 $('btn-add-folder').addEventListener('click', async () => {
   const folder = await addFolder('New Folder');
   await renderTrackedList();
-  // Immediately start renaming the new folder
   const newSection = document.querySelector(`[data-folder-id="${folder.id}"]`);
-  if (newSection) {
-    const header = newSection.querySelector('.folder-header');
-    startRename(header, folder);
-  }
+  if (newSection) startRename(newSection.querySelector('.folder-header'), folder);
 });
 
-// ─── Badge ────────────────────────────────────────────────────────────────────
+// ─── Badge & summary ──────────────────────────────────────────────────────────
 
 async function updateTrackedBadge() {
   const items = await getAllItems();
@@ -533,21 +594,11 @@ async function updateTrackedBadge() {
   badge.classList.toggle('hidden', count === 0);
 }
 
-// Re-render tracked list when tab is clicked (keeps it fresh after tracking/untracking)
-tabs.forEach(tab => {
-  if (tab.dataset.tab === 'tracked') {
-    tab.addEventListener('click', renderTrackedList, { once: false });
-  }
-});
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// ─── Utilities ────────────────────────────────────────────────────────────────
 
 function escHtml(str) {
   return String(str ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
 // ─── Boot ─────────────────────────────────────────────────────────────────────

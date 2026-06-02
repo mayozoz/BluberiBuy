@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "PriceThread",
+  "name": "BluberiBuy",
   "version": "0.1.0",
   "description": "Track price history on luxury fashion items. Get notified on price drops and low inventory.",
 
@@ -14,7 +14,8 @@
 
   "host_permissions": [
     "https://www.ssense.com/*",
-    "https://www.therealreal.com/*"
+    "https://www.therealreal.com/*",
+    "https://www.fashionphile.com/*"
   ],
 
   "background": {
@@ -35,7 +36,8 @@
     {
       "matches": [
         "https://www.ssense.com/*/product/*",
-        "https://www.therealreal.com/products/*"
+        "https://www.therealreal.com/products/*",
+        "https://www.fashionphile.com/products/*"
       ],
       "js": ["content/content.js"],
       "run_at": "document_idle"

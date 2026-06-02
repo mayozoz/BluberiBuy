@@ -1,5 +1,5 @@
 /**
- * content.js — PriceThread content script
+ * content.js — BluberiBuy content script
  *
  * Injected into supported product pages. Responsible for:
  *   1. Detecting which site we're on
@@ -46,6 +46,22 @@ const SITE_CONFIGS = {
       brand:   ['[data-testid="brand-name"]', '[class*="brand-name"]', '[class*="BrandName"]'],
       image:   ['[data-testid="product-image"] img', '[class*="product-image"] img', '[class*="ProductImage"] img'],
       soldOut: ['[data-testid="sold-badge"]', '[class*="sold"]', '[class*="Sold"]'],
+    },
+  },
+
+  // Fashionphile: Shopify-based luxury resale.
+  // JSON-LD extraction (Strategy A) handles price/brand/image automatically.
+  // Selectors below are the CSS fallback only.
+  'fashionphile.com': {
+    name:        'fashionphile',
+    displayName: 'Fashionphile',
+    currency:    'USD',
+    selectors: {
+      price:   ['.price-item--sale', '.price-item--regular', '.price-item'],
+      name:    ['.fp-product-title__details', 'h1.product__title', 'h1'],
+      brand:   ['.fp-product-vendor__link', '.fp-product-vendor', '[class*="vendor"]'],
+      image:   ['.product__media img', '.product-media img', '[class*="ProductMedia"] img'],
+      soldOut: ['[data-sold-out-message]', '.sold-out-message', 'button[disabled][name="add"]'],
     },
   },
 

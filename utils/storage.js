@@ -1,5 +1,5 @@
 /**
- * storage.js — PriceThread data layer
+ * storage.js — BluberiBuy data layer
  *
  * All reads/writes go through this module. The API is intentionally
  * backend-agnostic: swap the internals to Firebase/Supabase in Phase 2
@@ -7,7 +7,7 @@
  *
  * Data shape stored in chrome.storage.local:
  * {
- *   pricethread: {
+ *   bluberiBuy: {
  *     trackedItems: { [itemId]: TrackedItem },
  *     settings: Settings
  *   }
@@ -54,7 +54,7 @@
  * Items have folderId: string — set to site id by default, or any folder id.
  */
 
-const ROOT_KEY = 'pricethread';
+const ROOT_KEY = 'bluberiBuy';
 
 const DEFAULT_SETTINGS = {
   checkIntervalHours: 6,
@@ -67,8 +67,9 @@ const DEFAULT_SETTINGS = {
 
 // Default folders created automatically (one per supported site)
 const DEFAULT_FOLDERS = [
-  { id: 'ssense',      name: 'SSENSE',       isDefault: true, order: 0 },
-  { id: 'therealreal', name: 'The RealReal',  isDefault: true, order: 1 },
+  { id: 'ssense',       name: 'SSENSE',        isDefault: true, order: 0 },
+  { id: 'therealreal',  name: 'The RealReal',   isDefault: true, order: 1 },
+  { id: 'fashionphile', name: 'Fashionphile',   isDefault: true, order: 2 },
 ];
 
 async function _read() {
@@ -178,6 +179,16 @@ export async function addItem(productData) {
     return existing;
   }
 
+  // ── Already tracked (not hidden) — just update current price and image ───────
+  if (existing && !existing.isHidden) {
+    existing.currentPrice = productData.price;
+    existing.image        = productData.image || existing.image;
+    existing.lastChecked  = now;
+    data.trackedItems[existing.id] = existing;
+    await _write(data);
+    return existing;
+  }
+
   // ── Normal (first-time) add ─────────────────────────────────────────────────
   const item = {
     id:           productData.id,
@@ -202,6 +213,7 @@ export async function addItem(productData) {
     isActive:     true,
     isHidden:     false,
     notifications: { browser: true, email: false },
+    targetPrice:  null,
   };
 
   data.trackedItems[item.id] = item;
@@ -237,6 +249,14 @@ export async function updateItemNotifications(itemId, patch) {
       ...data.trackedItems[itemId].notifications,
       ...patch,
     };
+    await _write(data);
+  }
+}
+
+export async function setTargetPrice(itemId, price) {
+  const data = await _read();
+  if (data.trackedItems[itemId]) {
+    data.trackedItems[itemId].targetPrice = price;
     await _write(data);
   }
 }

@@ -1,5 +1,5 @@
 /**
- * seed.js — Dev helper for PriceThread
+ * seed.js — Dev helper for BluberiBuy
  *
  * Injects three test TrackedItems directly into chrome.storage.local so you
  * can preview the sparkline, verdict badge, and restock visual break without
@@ -134,17 +134,20 @@ const ITEM_RESTOCK = {
 
 // ─── Storage helpers ──────────────────────────────────────────────────────────
 
+const ROOT_KEY = 'bluberiBuy';
 const TEST_IDS = [ITEM_WAIT.id, ITEM_BUY.id, ITEM_RESTOCK.id];
 
 async function readStorage() {
   return new Promise((resolve) => {
-    chrome.storage.local.get(['trackedItems', 'folders'], resolve);
+    chrome.storage.local.get(ROOT_KEY, (result) => {
+      resolve(result[ROOT_KEY] || {});
+    });
   });
 }
 
-async function writeStorage(patch) {
+async function writeStorage(data) {
   return new Promise((resolve) => {
-    chrome.storage.local.set(patch, resolve);
+    chrome.storage.local.set({ [ROOT_KEY]: data }, resolve);
   });
 }
 
@@ -167,7 +170,7 @@ async function seed() {
     folders.therealreal = { id: 'therealreal', name: 'The RealReal', isDefault: true, order: 1 };
   }
 
-  await writeStorage({ trackedItems: items, folders });
+  await writeStorage({ ...data, trackedItems: items, folders });
 }
 
 // ─── Clear test items ─────────────────────────────────────────────────────────
@@ -176,7 +179,7 @@ async function clearTestItems() {
   const data = await readStorage();
   const items = data.trackedItems || {};
   for (const id of TEST_IDS) delete items[id];
-  await writeStorage({ trackedItems: items });
+  await writeStorage({ ...data, trackedItems: items });
 }
 
 // ─── Wire up buttons ──────────────────────────────────────────────────────────

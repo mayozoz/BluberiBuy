@@ -1,5 +1,5 @@
 /**
- * heuristic.js — "Buy now or wait?" signal for PriceThread
+ * heuristic.js — "Buy now or wait?" signal for BluberiBuy
  *
  * Combines two complementary approaches:
  *
@@ -78,16 +78,17 @@ export function analyzePriceTrend(item) {
   const now           = Date.now();
   const originalPrice = item.originalPrice;
   const inventory     = item.inventory;
-  const site          = item.site; // 'ssense' | 'therealreal'
-  const isTrr         = site === 'therealreal';
+  const site          = item.site;
+  // Consignment/resale sites: unique items, low stock is a strong signal
+  const isConsignment = site === 'therealreal' || site === 'fashionphile';
 
   // Already gone — short-circuit
   if (inventory === 'sold' || inventory === 'out_of_stock') {
     return {
-      verdict:    'buy',
-      reason:     isTrr
+      verdict:    'hold',
+      reason:     isConsignment
         ? 'This item has sold — consignment pieces rarely return at the same price.'
-        : 'Currently out of stock.',
+        : 'Currently out of stock — check back for restocks.',
       confidence: 'high',
     };
   }
@@ -120,7 +121,7 @@ export function analyzePriceTrend(item) {
   // Inventory urgency (0 = none, 1 = moderate, 2 = high)
   let inventoryUrgency = 0;
   if (inventory === 'low') {
-    inventoryUrgency = isTrr ? 2 : 1;
+    inventoryUrgency = isConsignment ? 2 : 1;
 
     // Bonus: did inventory JUST turn low this check? Even more urgent.
     const inventoryHistory = working;
@@ -128,7 +129,7 @@ export function analyzePriceTrend(item) {
     if (lastTwo.length === 2 &&
         lastTwo[1].inventory === 'low' &&
         lastTwo[0].inventory === 'in_stock') {
-      if (isTrr) inventoryUrgency = 2; // already 2, leave it
+      if (isConsignment) inventoryUrgency = 2; // already 2, leave it
       else inventoryUrgency = Math.min(inventoryUrgency + 1, 2);
     }
   }
@@ -161,7 +162,7 @@ export function analyzePriceTrend(item) {
   }
   if (inventoryUrgency === 2) {
     score += 4;
-    why.push(isTrr ? 'low stock on a consignment item' : 'very low stock');
+    why.push(isConsignment ? 'low stock on a consignment item' : 'very low stock');
   } else if (inventoryUrgency === 1) {
     score += 2;
     why.push('low stock');
