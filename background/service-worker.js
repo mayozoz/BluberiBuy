@@ -14,10 +14,9 @@
  *   the passive update from content.js (when the user visits the page) is the
  *   reliable fallback.
  *
- * Phase 2 — Email notifications:
- *   Stubbed below. Implement by calling your serverless endpoint (Firebase
- *   Functions, Supabase Edge Function, Vercel, etc.) with the item and
- *   recipient email address from settings.
+ * Email notifications:
+ *   Implemented via EmailJS — credentials stored in settings and called
+ *   directly from the service worker (no backend required).
  */
 
 import {
