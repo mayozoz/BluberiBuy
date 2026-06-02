@@ -79,6 +79,7 @@ const INVENTORY_LABEL = {
   in_stock:    { text: 'In Stock',     color: '#22c55e' },
   low:         { text: 'Low Stock',    color: '#f59e0b' },
   out_of_stock:{ text: 'Out of Stock', color: '#ef4444' },
+  coming_soon: { text: 'Coming Soon',  color: '#a78bfa' },
   sold:        { text: 'Sold',         color: '#6b7280' },
   unknown:     { text: '',             color: 'transparent' },
 };

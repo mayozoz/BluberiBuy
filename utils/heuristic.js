@@ -82,13 +82,20 @@ export function analyzePriceTrend(item) {
   // Consignment/resale sites: unique items, low stock is a strong signal
   const isConsignment = site === 'therealreal' || site === 'fashionphile';
 
-  // Already gone — short-circuit
+  // Already gone or not yet available — short-circuit
   if (inventory === 'sold' || inventory === 'out_of_stock') {
     return {
       verdict:    'hold',
       reason:     isConsignment
         ? 'This item has sold — consignment pieces rarely return at the same price.'
         : 'Currently out of stock — check back for restocks.',
+      confidence: 'high',
+    };
+  }
+  if (inventory === 'coming_soon') {
+    return {
+      verdict:    'hold',
+      reason:     'This item is not yet available — check back when it goes on sale.',
       confidence: 'high',
     };
   }

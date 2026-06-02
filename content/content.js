@@ -61,7 +61,8 @@ const SITE_CONFIGS = {
       name:    ['.fp-product-title__details', 'h1.product__title', 'h1'],
       brand:   ['.fp-product-vendor__link', '.fp-product-vendor', '[class*="vendor"]'],
       image:   ['.product__media img', '.product-media img', '[class*="ProductMedia"] img'],
-      soldOut: ['[data-sold-out-message]', '.sold-out-message', 'button[disabled][name="add"]'],
+      soldOut:     ['[data-sold-out-message]', '.sold-out-message', 'button[disabled][name="add"]'],
+      comingSoon:  ['[class*="coming-soon"]', '[class*="comingSoon"]', '[data-coming-soon]', '[class*="notify-me"]', '.notify-me-form'],
     },
   },
 
@@ -140,9 +141,11 @@ function extractFromJsonLd() {
 
       const availability = (offer?.availability || '').toLowerCase();
       let inventory = 'unknown';
-      if (availability.includes('outofstock'))        inventory = 'out_of_stock';
-      else if (availability.includes('limitedavail')) inventory = 'low';
-      else if (availability.includes('instock'))      inventory = 'in_stock';
+      if (availability.includes('outofstock'))                          inventory = 'out_of_stock';
+      else if (availability.includes('limitedavail'))                  inventory = 'low';
+      else if (availability.includes('instock'))                       inventory = 'in_stock';
+      else if (availability.includes('preorder') ||
+               availability.includes('presale'))                       inventory = 'coming_soon';
 
       // Look for the original / list price in priceSpecification
       let originalPrice = null;
@@ -191,12 +194,17 @@ function extractFromSelectors(config) {
   const brandEl         = queryFirst(config.selectors.brand);
   const imageEl         = queryFirst(config.selectors.image);
   const soldOutEl       = queryFirst(config.selectors.soldOut);
+  const comingSoonEl    = config.selectors.comingSoon ? queryFirst(config.selectors.comingSoon) : null;
   const originalPriceEl = queryFirst(ORIGINAL_PRICE_SELECTORS);
 
   const price         = parsePrice(priceEl?.textContent?.trim());
   const parsedOriginal = parsePrice(originalPriceEl?.textContent?.trim());
   // Only use original price if it's strictly higher than the sale price
   const originalPrice = parsedOriginal && parsedOriginal > price ? parsedOriginal : null;
+
+  let inventory = 'in_stock';
+  if (comingSoonEl)  inventory = 'coming_soon';
+  else if (soldOutEl) inventory = 'out_of_stock';
 
   return {
     name:          nameEl?.textContent?.trim() || document.title,
@@ -205,7 +213,7 @@ function extractFromSelectors(config) {
     originalPrice,
     currency:      config.currency || 'USD',
     image:         imageEl?.src || imageEl?.getAttribute('data-src') || '',
-    inventory:     soldOutEl ? 'out_of_stock' : 'in_stock',
+    inventory,
   };
 }
 
