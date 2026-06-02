@@ -197,64 +197,113 @@ function fmtPrice(price, currency = 'USD') {
   }).format(price);
 }
 
+function canEmail(settings) {
+  return !!(settings.emailNotifications &&
+            settings.emailAddress &&
+            settings.emailJsServiceId &&
+            settings.emailJsTemplateId &&
+            settings.emailJsPublicKey);
+}
+
+async function sendEmailNotification(settings, { subject, itemName, message, itemUrl }) {
+  try {
+    await fetch('https://api.emailjs.com/api/v1.0/email/send', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        service_id:  settings.emailJsServiceId,
+        template_id: settings.emailJsTemplateId,
+        user_id:     settings.emailJsPublicKey,
+        template_params: {
+          to_email:  settings.emailAddress,
+          subject,
+          item_name: itemName,
+          message,
+          item_url:  itemUrl,
+        },
+      }),
+    });
+  } catch (err) {
+    console.warn('[BluberiBuy] Email send failed:', err.message);
+  }
+}
+
 async function notifyPriceDrop(item, prevPrice, newPrice, settings) {
-  if (!settings.browserNotifications) return;
+  const drop = prevPrice - newPrice;
+  const pct  = Math.round((drop / prevPrice) * 100);
+  const msg  = `${item.siteName}: ${fmtPrice(prevPrice, item.currency)} → ${fmtPrice(newPrice, item.currency)} (${pct}% off, save ${fmtPrice(drop, item.currency)})`;
 
-  const drop    = prevPrice - newPrice;
-  const pct     = Math.round((drop / prevPrice) * 100);
-  const notifId = `drop_${item.id}_${Date.now()}`;
+  if (settings.browserNotifications) {
+    chrome.notifications.create(`drop_${item.id}_${Date.now()}`, {
+      type:    'basic',
+      iconUrl: ICON_PATH,
+      title:   `Price drop on ${item.brand || item.name}`,
+      message: msg,
+      buttons: [{ title: 'View item' }],
+    });
+  }
 
-  chrome.notifications.create(notifId, {
-    type:    'basic',
-    iconUrl: ICON_PATH,
-    title:   `Price drop on ${item.brand || item.name}`,
-    message: `${item.siteName}: ${fmtPrice(prevPrice, item.currency)} → ${fmtPrice(newPrice, item.currency)} (${pct}% off, save ${fmtPrice(drop, item.currency)})`,
-    buttons: [{ title: 'View item' }],
-  });
-
-  // ── Phase 2: Email notification ──────────────────────────────────────────────
-  // if (settings.emailNotifications && settings.emailAddress && item.notifications?.email) {
-  //   await sendEmailNotification({
-  //     to:      settings.emailAddress,
-  //     subject: `Price drop: ${item.name}`,
-  //     body:    `${item.siteName} dropped from ${fmtPrice(prevPrice)} to ${fmtPrice(newPrice)}.\n${item.url}`,
-  //   });
-  // }
+  if (canEmail(settings) && item.notifications?.email) {
+    await sendEmailNotification(settings, {
+      subject:  `Price drop: ${item.brand || item.name}`,
+      itemName: item.brand || item.name,
+      message:  msg,
+      itemUrl:  item.url,
+    });
+  }
 }
 
 async function notifyInventoryChange(item, inventory, settings) {
-  if (!settings.browserNotifications) return;
-
   const labels = {
     low:          `Low inventory — only a few left`,
     out_of_stock: `Now out of stock`,
     sold:         `This item has sold`,
   };
 
-  const message = labels[inventory];
-  if (!message) return;
+  const msg = labels[inventory];
+  if (!msg) return;
 
-  chrome.notifications.create(`inv_${item.id}_${Date.now()}`, {
-    type:    'basic',
-    iconUrl: ICON_PATH,
-    title:   `Inventory alert: ${item.brand || item.name}`,
-    message: `${item.siteName}: ${message}`,
-    buttons: [{ title: 'View item' }],
-  });
+  if (settings.browserNotifications) {
+    chrome.notifications.create(`inv_${item.id}_${Date.now()}`, {
+      type:    'basic',
+      iconUrl: ICON_PATH,
+      title:   `Inventory alert: ${item.brand || item.name}`,
+      message: `${item.siteName}: ${msg}`,
+      buttons: [{ title: 'View item' }],
+    });
+  }
 
-  // Phase 2: email stub (same pattern as above)
+  if (canEmail(settings) && item.notifications?.email) {
+    await sendEmailNotification(settings, {
+      subject:  `Inventory alert: ${item.brand || item.name}`,
+      itemName: item.brand || item.name,
+      message:  `${item.siteName}: ${msg}`,
+      itemUrl:  item.url,
+    });
+  }
 }
 
 async function notifyTargetPrice(item, newPrice, settings) {
-  if (!settings.browserNotifications) return;
+  const msg = `${item.siteName}: now ${fmtPrice(newPrice, item.currency)} — your target was ${fmtPrice(item.targetPrice, item.currency)}`;
 
-  chrome.notifications.create(`target_${item.id}_${Date.now()}`, {
-    type:    'basic',
-    iconUrl: ICON_PATH,
-    title:   `Target price reached: ${item.brand || item.name}`,
-    message: `${item.siteName}: now ${fmtPrice(newPrice, item.currency)} — your target was ${fmtPrice(item.targetPrice, item.currency)}`,
-    buttons: [{ title: 'View item' }],
-  });
+  if (settings.browserNotifications) {
+    chrome.notifications.create(`target_${item.id}_${Date.now()}`, {
+      type:    'basic',
+      iconUrl: ICON_PATH,
+      title:   `Target price reached: ${item.brand || item.name}`,
+      message: msg,
+      buttons: [{ title: 'View item' }],
+    });
+  }
+
+  if (canEmail(settings) && item.notifications?.email) {
+    await sendEmailNotification(settings, {
+      subject:  `Target price reached: ${item.brand || item.name}`,
+      itemName: item.brand || item.name,
+      message:  msg,
+      itemUrl:  item.url,
+    });
+  }
 }
 
 // Open the item's page when the user clicks "View item" in a notification

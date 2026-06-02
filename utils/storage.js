@@ -42,6 +42,9 @@
  *   browserNotifications: boolean
  *   emailNotifications:   boolean
  *   emailAddress:         string
+ *   emailJsServiceId:     string
+ *   emailJsTemplateId:    string
+ *   emailJsPublicKey:     string
  * }
  *
  * Folder: {
@@ -61,6 +64,9 @@ const DEFAULT_SETTINGS = {
   browserNotifications: true,
   emailNotifications: false,
   emailAddress: '',
+  emailJsServiceId: '',
+  emailJsTemplateId: '',
+  emailJsPublicKey: '',
 };
 
 // ─── Low-level read / write ───────────────────────────────────────────────────

@@ -128,11 +128,11 @@
         </div>
         <div class="notif-row">
           <div class="notif-row__label">
-            <span>📧</span><span>Email alerts <span class="soon">Phase 2</span></span>
+            <span>📧</span><span>Email alerts</span>
           </div>
           <label class="toggle">
-            <input type="checkbox" id="toggle-email" disabled />
-            <span class="toggle__track toggle__track--disabled"></span>
+            <input type="checkbox" id="toggle-email" />
+            <span class="toggle__track"></span>
           </label>
         </div>
 
@@ -216,11 +216,34 @@
       </label>
     </label>
 
-    <div class="field">
-      <span class="field__label">Email notifications <span class="soon">Phase 2</span></span>
-      <input class="field__input" type="email" id="setting-email" placeholder="your@email.com" disabled />
-      <p class="field__hint">Email alerts require a backend — coming in Phase 2.</p>
-    </div>
+    <label class="field">
+      <span class="field__label">Email notifications</span>
+      <label class="toggle">
+        <input type="checkbox" id="setting-email-notif" />
+        <span class="toggle__track"></span>
+      </label>
+    </label>
+
+    <label class="field">
+      <span class="field__label">Email address</span>
+      <input class="field__input" type="email" id="setting-email" placeholder="you@example.com" />
+    </label>
+
+    <label class="field">
+      <span class="field__label">EmailJS Service ID</span>
+      <input class="field__input" type="text" id="setting-emailjs-service" placeholder="service_xxxxxxx" />
+    </label>
+
+    <label class="field">
+      <span class="field__label">EmailJS Template ID</span>
+      <input class="field__input" type="text" id="setting-emailjs-template" placeholder="template_xxxxxxx" />
+    </label>
+
+    <label class="field">
+      <span class="field__label">EmailJS Public Key</span>
+      <input class="field__input" type="text" id="setting-emailjs-key" placeholder="xxxxxxxxxxxxxxxxxxxx" />
+      <p class="field__hint">Free account at emailjs.com → Account → API Keys. Template vars: to_email, subject, item_name, message, item_url.</p>
+    </label>
 
     <button class="btn btn--primary" id="btn-save-settings">Save settings</button>
     <p class="settings-saved hidden" id="settings-saved">✓ Saved</p>

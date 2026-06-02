@@ -65,9 +65,16 @@ $('btn-close-settings').addEventListener('click', () => {
 
 $('btn-save-settings').addEventListener('click', async () => {
   const intervalHours = parseInt($('setting-interval').value, 10);
-  const browserNotif  = $('setting-browser-notif').checked;
 
-  await saveSettings({ checkIntervalHours: intervalHours, browserNotifications: browserNotif });
+  await saveSettings({
+    checkIntervalHours:  intervalHours,
+    browserNotifications: $('setting-browser-notif').checked,
+    emailNotifications:   $('setting-email-notif').checked,
+    emailAddress:         $('setting-email').value.trim(),
+    emailJsServiceId:     $('setting-emailjs-service').value.trim(),
+    emailJsTemplateId:    $('setting-emailjs-template').value.trim(),
+    emailJsPublicKey:     $('setting-emailjs-key').value.trim(),
+  });
   chrome.runtime.sendMessage({ type: 'UPDATE_CHECK_INTERVAL', intervalHours });
 
   const saved = $('settings-saved');
@@ -77,9 +84,13 @@ $('btn-save-settings').addEventListener('click', async () => {
 
 async function loadSettingsIntoForm() {
   const s = await getSettings();
-  $('setting-interval').value        = String(s.checkIntervalHours);
-  $('setting-browser-notif').checked = s.browserNotifications;
-  $('setting-email').value           = s.emailAddress || '';
+  $('setting-interval').value          = String(s.checkIntervalHours);
+  $('setting-browser-notif').checked   = s.browserNotifications;
+  $('setting-email-notif').checked     = s.emailNotifications;
+  $('setting-email').value             = s.emailAddress || '';
+  $('setting-emailjs-service').value   = s.emailJsServiceId || '';
+  $('setting-emailjs-template').value  = s.emailJsTemplateId || '';
+  $('setting-emailjs-key').value       = s.emailJsPublicKey || '';
 }
 
 // ─── State helpers ────────────────────────────────────────────────────────────
@@ -216,10 +227,13 @@ async function refreshTrackingUI() {
 
     // Notification toggles
     $('notif-settings').classList.remove('hidden');
-    $('toggle-browser').checked = item.notifications?.browser ?? true;
-    $('toggle-email').checked   = item.notifications?.email   ?? false;
+    $('toggle-browser').checked  = item.notifications?.browser ?? true;
+    $('toggle-email').checked    = item.notifications?.email   ?? false;
     $('toggle-browser').onchange = async (e) => {
       await updateItemNotifications(currentItemId, { browser: e.target.checked });
+    };
+    $('toggle-email').onchange = async (e) => {
+      await updateItemNotifications(currentItemId, { email: e.target.checked });
     };
 
     // Target price
