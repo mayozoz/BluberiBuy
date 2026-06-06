@@ -1,74 +1,72 @@
-# 🧵 BluberiBuy
+# BluberiBuy
 
-A personal Chrome extension for tracking price history on luxury fashion items.
-Works on **SSENSE** and **The RealReal** out of the box, and is built to be extended.
+A Chrome extension for tracking price history on luxury fashion items and telling you the perfect time to buy.
+
+Works on **The RealReal**, **Fashionphile**, and **SSENSE**.
+
+**[Install on the Chrome Web Store](https://chromewebstore.google.com/detail/bluberibuy/hebofgjcejgihignpbijmoicklaopijb)** · **[Landing Page](https://mayozoz.github.io/BluberiBuy/)**
 
 ---
 
-## Features (Phase 1 — this)
+## Features
 
 - Track any product with one click from the extension popup
-- Records full price history with timestamps
-- Tracks **high** and **low** watermarks automatically
-- Shows a price **sparkline** in the popup
-- Background price checks every N hours (no tab required)
-- **Browser notifications** on price drops and inventory changes
-- Per-item notification settings (on/off)
-- Pause tracking without losing history
-- SPA-aware — works on React-based sites that don't do full page reloads
-
-## Planned (Phase 2 - still working on this)
-
-- Email notifications via serverless backend (Firebase Functions / Supabase Edge)
-- Cross-device sync (Firebase / Supabase storage)
-- AI features: price-drop predictions, style recommendations, "buy now or wait" signals
-- More supported sites (Farfetch, Net-a-Porter, Vestiaire Collective, etc.)
+- Full price history with sparkline chart, high/low watermarks, and restock markers
+- **"Buy now or wait?"** recommendation — combines linear regression with rule-based heuristics (inventory urgency, all-time low, MSRP discount, price stability)
+- Background price checks on a configurable schedule (no tab required)
+- **Browser and email notifications** for price drops, inventory changes, and target price hits
+- Set a **target price** per item and get alerted the moment it's hit
+- Organize tracked items into **folders** with drag-and-drop
+- Sort by biggest drop %, recently updated, or price
+- Consignment-aware — low stock on The RealReal/Fashionphile triggers a stronger buy signal than on a retail site
+- SPA-aware — works on React-based sites without full page reloads
+- 100% local — no account, no backend, no cloud sync
 
 ---
 
 ## Project structure
 
 ```
-Blueberry/
-├── manifest.json               # Extension config (Manifest V3)
+BluberiBuy/
+├── manifest.json               # MV3 extension config
+├── background/
+│   └── service-worker.js       # Scheduled background checks, notifications, email
+├── content/
+│   └── content.js              # Injected into product pages; extracts product data
 ├── popup/
 │   ├── popup.html              # Extension popup UI
-│   ├── popup.css               # Popup styles
-│   └── popup.js                # Popup logic (ES module)
-├── background/
-│   └── service-worker.js       # Background price checker + notifications
-├── content/
-│   └── content.js              # Injected into product pages; extracts data
+│   ├── popup.css               # Cream/brown luxury color scheme
+│   └── popup.js                # Popup controller logic
 ├── utils/
-│   ├── storage.js              # All chrome.storage reads/writes (swappable)
-│   └── helpers.js              # Price formatting, sparkline, date utils
+│   ├── storage.js              # Data persistence layer (chrome.storage.local)
+│   ├── helpers.js              # Formatting, sparkline chart, inventory display
+│   └── heuristic.js            # "Buy now or wait?" scoring algorithm
+├── docs/                       # GitHub Pages landing page
+├── dev/
+│   ├── seed.html               # Dev UI to inject test data
+│   └── seed.js                 # Test data generator
 └── icons/
     ├── icon16.png
     ├── icon48.png
     └── icon128.png
 ```
 
-> **Note on icons:** You'll need to add PNG icons at those three sizes before loading the extension. Any 16×16, 48×48, and 128×128 images will work — even plain colored squares for development.
-
 ---
 
-## Loading the extension in Chrome
+## Loading the extension locally
 
-1. Open Chrome and navigate to `chrome://extensions`
-2. Enable **Developer mode** (toggle in the top-right)
+1. Go to `chrome://extensions`
+2. Enable **Developer mode** (top-right toggle)
 3. Click **Load unpacked**
 4. Select the `BluberiBuy/` folder (the one containing `manifest.json`)
-5. The icon will appear in your toolbar (pin it for easy access)
 
-To reload after code changes: click the refresh ↺ icon on the extension card in `chrome://extensions`.
+To reload after code changes: click the ↺ icon on the extension card.
 
 ---
 
-## How to add a new site
+## Adding a new site
 
-**1. Add the site config to `content/content.js`**
-
-Add a new entry to the `SITE_CONFIGS` object:
+**1. Add a site config block to `content/content.js`**
 
 ```js
 'newsite.com': {
@@ -85,21 +83,28 @@ Add a new entry to the `SITE_CONFIGS` object:
 },
 ```
 
-**Tip:** JSON-LD extraction (the primary method) is automatic — the selectors are only a fallback.
-Open the product page, inspect the `<head>`, and look for `<script type="application/ld+json">`.
-If there's a `Product` object with `offers.price`, the extension will pick it up with no changes.
+JSON-LD extraction is automatic — check the page source for `<script type="application/ld+json">` with a `Product` node first. Selectors are only a fallback.
 
 **2. Add URL patterns to `manifest.json`**
 
-In both `content_scripts[0].matches` and `host_permissions`:
+Add to both `content_scripts[0].matches` and `host_permissions`:
 
 ```json
 "https://www.newsite.com/products/*"
 ```
 
-**3. Reload the extension**
+**3. Reload the extension.** That's it.
 
-That's it.
+---
+
+## Email notifications
+
+Email alerts use [EmailJS](https://emailjs.com) — no backend required.
+
+1. Create a free EmailJS account and connect an email service (Gmail, Outlook, etc.)
+2. Create a template with these variables: `{{to_email}}`, `{{subject}}`, `{{item_name}}`, `{{message}}`, `{{item_url}}`
+3. In the extension Settings, enter your email address, Service ID, Template ID, and Public Key
+4. Enable email notifications globally, then toggle the envelope icon on individual items
 
 ---
 
@@ -111,50 +116,41 @@ All data lives in `chrome.storage.local` under the key `bluberiBuy`.
 {
   trackedItems: {
     "<itemId>": {
-      id, url, site, siteName,
-      name, brand, image,
-      currentPrice, currency,
+      id, url, site, siteName, name, brand, image,
+      currentPrice, originalPrice, currency,
       highPrice, lowPrice,
-      inventory,        // "in_stock" | "low" | "out_of_stock" | "sold" | "unknown"
-      priceHistory: [{ price, inventory, timestamp }],
+      inventory,        // "in_stock" | "low" | "out_of_stock" | "coming_soon" | "sold" | "unknown"
+      priceHistory: [{ price, inventory, timestamp, type? }],  // type: "restock" for sentinel entries
       addedAt, lastChecked,
-      isActive,
-      notifications: { browser, email }
+      isActive,         // false = paused
+      isHidden,         // true = soft-deleted (history preserved)
+      notifications: { browser, email },
+      targetPrice,
+      folderId
     }
   },
   settings: {
-    checkIntervalHours,       // default: 6
-    browserNotifications,     // default: true
-    emailNotifications,       // default: false
+    checkIntervalHours,
+    browserNotifications,
+    emailNotifications,
     emailAddress,
     emailJsServiceId,
     emailJsTemplateId,
     emailJsPublicKey,
+  },
+  folders: {
+    "<folderId>": { id, name, isDefault, order }
   }
 }
 ```
 
-To migrate to Firebase or Supabase: replace the internals of `utils/storage.js` with your
-SDK calls. The exported function signatures stay exactly the same — nothing else in the
-codebase needs to change.
+To migrate to Firebase or Supabase: swap the internals of `utils/storage.js`. The exported function signatures stay the same — nothing else needs to change.
 
 ---
 
-## Email notifications
+## Planned
 
-Email alerts are powered by [EmailJS](https://emailjs.com) — no backend required.
-
-1. Create a free EmailJS account and add an email service (Gmail, Outlook, etc.)
-2. Create a template using these variables: `{{to_email}}`, `{{subject}}`, `{{item_name}}`, `{{message}}`, `{{item_url}}`
-3. In the extension Settings, enter your email address, Service ID, Template ID, and Public Key
-4. Enable Email notifications globally, then toggle 📧 on any tracked item
-
----
-
-## Notes on bot detection
-
-Some luxury sites run Cloudflare or custom bot detection.
-The background `fetch()` in the service worker uses realistic request headers and is usually
-fine for low-frequency personal use. If a site starts returning 403s, the extension will
-gracefully fall back to **passive updates** — it records the price whenever you naturally
-visit the product page in a tab (the content script fires automatically).
+- Cross-device sync via Firebase or Supabase
+- Serverless backend for more reliable email delivery
+- Additional supported sites: Farfetch, Net-a-Porter, Vestiaire Collective
+- AI-driven price prediction and style recommendations
