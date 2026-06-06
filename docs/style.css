@@ -291,6 +291,16 @@ footer {
   color: var(--text-muted);
 }
 
+/* ── SEO ── */
+.seo-keywords {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0,0,0,0);
+  white-space: nowrap;
+}
+
 /* ── Responsive ── */
 @media (max-width: 600px) {
   .hero { padding: 80px 20px 72px; }
