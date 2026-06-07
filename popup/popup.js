@@ -480,7 +480,7 @@ function buildFolderSection(folder, folderItems, allFolders) {
 
 function buildItemCard(item, folderId) {
   const card = document.createElement('div');
-  card.className      = 'item-card';
+  card.className      = `item-card${item.site ? ` item-card--${item.site}` : ''}`;
   card.draggable      = true;
   card.dataset.itemId = item.id;
 
