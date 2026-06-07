@@ -15,7 +15,8 @@
   "host_permissions": [
     "https://www.ssense.com/*",
     "https://www.therealreal.com/*",
-    "https://www.fashionphile.com/*"
+    "https://www.fashionphile.com/*",
+    "https://www.theoutnet.com/*"
   ],
 
   "background": {
@@ -37,7 +38,8 @@
       "matches": [
         "https://www.ssense.com/*/product/*",
         "https://www.therealreal.com/products/*",
-        "https://www.fashionphile.com/products/*"
+        "https://www.fashionphile.com/products/*",
+        "https://www.theoutnet.com/*/shop/product/*"
       ],
       "js": ["content/content.js"],
       "run_at": "document_idle"

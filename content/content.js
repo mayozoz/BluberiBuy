@@ -49,6 +49,21 @@ const SITE_CONFIGS = {
     },
   },
 
+  // The Outnet: NET-A-PORTER's luxury outlet. Limited stock, items don't restock.
+  // JSON-LD extraction handles most data; selectors are CSS fallback.
+  'theoutnet.com': {
+    name:        'theoutnet',
+    displayName: 'The Outnet',
+    currency:    'USD',
+    selectors: {
+      price:   ['[data-component="Price"] [data-test="price-sale"]', '[class*="price-sale"]', '[class*="priceSale"]', '[data-test="price"]'],
+      name:    ['h1[data-component="ProductName"]', 'h1[class*="product-name"]', 'h1[class*="productName"]', 'h1'],
+      brand:   ['[data-component="DesignerName"] a', '[class*="designer-name"]', '[class*="designerName"]'],
+      image:   ['[data-component="ProductImage"] img', '[class*="product-image"] img', 'img[class*="ProductImage"]'],
+      soldOut: ['[data-test="sold-out"]', '[class*="sold-out"]', 'button[disabled][class*="add-to-bag"]'],
+    },
+  },
+
   // Fashionphile: Shopify-based luxury resale.
   // JSON-LD extraction (Strategy A) handles price/brand/image automatically.
   // Selectors below are the CSS fallback only.
