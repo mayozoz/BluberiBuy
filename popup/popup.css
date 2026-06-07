@@ -659,9 +659,11 @@ body {
 
 .item-card--ssense .item-card__img {
   object-fit: contain;
-  background: #f8f3ec;
+  background: #ffffff;
+  padding: 10px;
+  box-sizing: border-box;
 }
-.item-card--ssense:hover .item-card__img { transform: none; }
+.item-card--ssense:hover .item-card__img { transform: scale(1.03); }
 
 /* Image placeholder inside card */
 .item-card .img-placeholder {
