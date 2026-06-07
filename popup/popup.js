@@ -20,7 +20,7 @@ import { analyzePriceTrend } from '../utils/heuristic.js';
 
 // ─── Supported sites ──────────────────────────────────────────────────────────
 
-const SUPPORTED_HOSTS = ['ssense.com', 'therealreal.com', 'fashionphile.com'];
+const SUPPORTED_HOSTS = ['ssense.com', 'therealreal.com', 'fashionphile.com', 'theoutnet.com'];
 
 function isSupportedUrl(url) {
   try { return SUPPORTED_HOSTS.some(h => new URL(url).hostname.includes(h)); }
