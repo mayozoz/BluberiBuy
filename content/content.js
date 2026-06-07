@@ -50,17 +50,19 @@ const SITE_CONFIGS = {
   },
 
   // The Outnet: NET-A-PORTER's luxury outlet. Limited stock, items don't restock.
-  // JSON-LD extraction handles most data; selectors are CSS fallback.
+  // No JSON-LD — relies entirely on CSS selectors.
+  // Class names use CSS modules with a build hash (e.g. PriceWithSchema11__value)
+  // so selectors use [class*=] substring matching to stay hash-independent.
   'theoutnet.com': {
     name:        'theoutnet',
     displayName: 'The Outnet',
     currency:    'USD',
     selectors: {
-      price:   ['[data-component="Price"] [data-test="price-sale"]', '[class*="price-sale"]', '[class*="priceSale"]', '[data-test="price"]'],
-      name:    ['h1[data-component="ProductName"]', 'h1[class*="product-name"]', 'h1[class*="productName"]', 'h1'],
-      brand:   ['[data-component="DesignerName"] a', '[class*="designer-name"]', '[class*="designerName"]'],
-      image:   ['[data-component="ProductImage"] img', '[class*="product-image"] img', 'img[class*="ProductImage"]'],
-      soldOut: ['[data-test="sold-out"]', '[class*="sold-out"]', 'button[disabled][class*="add-to-bag"]'],
+      price:   ['[class*="__value"] span[content]', '[class*="__value"]'],
+      name:    ['h1 [class*="__name"]', 'h1'],
+      brand:   ['h1 [class*="__designer"] a', '[class*="__designer"] a'],
+      image:   ['[class*="__mediaImage"] img', '[class*="__image"] img', '[class*="Gallery"] img', 'img[class*="product"]'],
+      soldOut: ['[class*="__soldOut"]', '[class*="sold-out"]', 'button[disabled][class*="bag"]'],
     },
   },
 
@@ -124,6 +126,7 @@ const ORIGINAL_PRICE_SELECTORS = [
   '[class*="retail-price"]',   '[class*="retailPrice"]',
   '[class*="regular-price"]',  '[class*="regularPrice"]',
   '[class*="list-price"]',     '[class*="listPrice"]',
+  '[class*="__previousPrice"]',  // The Outnet CSS module pattern
   'del', 's',   // HTML semantic strikethrough — broad but works on many sites
 ];
 
