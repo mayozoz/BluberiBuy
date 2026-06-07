@@ -273,17 +273,24 @@ function extractProductData() {
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type !== 'GET_PRODUCT_DATA') return false;
 
-  try {
-    const data = extractProductData();
-    if (data) {
-      sendResponse({ success: true, data });
-    } else {
-      sendResponse({ success: false, error: 'Could not extract product data from this page.' });
+  // Retry up to 5 times at 700ms intervals to handle SPAs (React, etc.) that
+  // render product content after document_idle fires.
+  const attempt = (retriesLeft) => {
+    try {
+      const data = extractProductData();
+      if (data) {
+        sendResponse({ success: true, data });
+      } else if (retriesLeft > 0) {
+        setTimeout(() => attempt(retriesLeft - 1), 700);
+      } else {
+        sendResponse({ success: false, error: 'Could not extract product data from this page.' });
+      }
+    } catch (err) {
+      sendResponse({ success: false, error: err.message });
     }
-  } catch (err) {
-    sendResponse({ success: false, error: err.message });
-  }
+  };
 
+  attempt(5);
   return true; // Keep the message channel open for async sendResponse
 });
 
