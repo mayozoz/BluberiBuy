@@ -658,12 +658,13 @@ body {
 .item-card:hover .item-card__img { transform: scale(1.05); }
 
 .item-card--ssense .item-card__img {
-  object-fit: cover;
+  object-fit: contain;
   background: #ffffff;
-  transform: scale(0.88);
+  padding: 6px;
+  box-sizing: border-box;
   transition: transform .32s ease;
 }
-.item-card--ssense:hover .item-card__img { transform: scale(0.94); }
+.item-card--ssense:hover .item-card__img { transform: scale(1.04); }
 
 /* Image placeholder inside card */
 .item-card .img-placeholder {
