@@ -61,7 +61,7 @@ const SITE_CONFIGS = {
       price:   ['[class*="__value"] span[content]', '[class*="__value"]'],
       name:    ['h1 [class*="__name"]', 'h1'],
       brand:   ['h1 [class*="__designer"] a', '[class*="__designer"] a'],
-      image:   ['[class*="__mediaImage"] img', '[class*="__image"] img', '[class*="Gallery"] img', 'img[class*="product"]'],
+      image:   ['[class*="__image"] img', '[class*="__mediaImage"] img'],
       soldOut: ['[class*="__soldOut"]', '[class*="sold-out"]', 'button[disabled][class*="bag"]'],
     },
   },
