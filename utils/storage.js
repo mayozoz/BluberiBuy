@@ -76,6 +76,7 @@ const DEFAULT_FOLDERS = [
   { id: 'ssense',       name: 'SSENSE',        isDefault: true, order: 0 },
   { id: 'therealreal',  name: 'The RealReal',   isDefault: true, order: 1 },
   { id: 'fashionphile', name: 'Fashionphile',   isDefault: true, order: 2 },
+  { id: 'theoutnet',    name: 'The Outnet',     isDefault: true, order: 3 },
 ];
 
 async function _read() {
