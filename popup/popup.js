@@ -5,10 +5,11 @@
 import {
   getSettings, saveSettings,
   getAllItems, getItem, isTracked,
-  addItem, removeItem, recordPrice,
+  addItem, removeItem,
   updateItemNotifications,
   setTargetPrice,
   getFolders, addFolder, renameFolder, removeFolder, setItemFolder,
+  getRefreshJob, REFRESH_JOB_KEY, ROOT_KEY, EMAIL_STATUS_KEY,
 } from '../utils/storage.js';
 
 import {
@@ -17,10 +18,11 @@ import {
 } from '../utils/helpers.js';
 
 import { analyzePriceTrend } from '../utils/heuristic.js';
+import { isEmailConfigured, SENDER_ADDRESS } from '../utils/email-config.js';
 
 // ─── Supported sites ──────────────────────────────────────────────────────────
 
-const SUPPORTED_HOSTS = ['ssense.com', 'therealreal.com', 'fashionphile.com', 'theoutnet.com'];
+const SUPPORTED_HOSTS = ['ssense.com', 'therealreal.com', 'fashionphile.com', 'theoutnet.com', 'vestiairecollective.com'];
 
 function isSupportedUrl(url) {
   try { return SUPPORTED_HOSTS.some(h => new URL(url).hostname.includes(h)); }
@@ -48,20 +50,31 @@ tabs.forEach(tab => {
     document.querySelectorAll('.panel').forEach(p => p.classList.add('hidden'));
     $(`panel-${tab.dataset.tab}`).classList.remove('hidden');
     if (tab.dataset.tab === 'tracked') renderTrackedList();
+    if (tab.dataset.tab === 'drops')   openDropsTab();
   });
 });
 
 // ─── Settings panel ───────────────────────────────────────────────────────────
 
+function openSettings() {
+  $('settings-panel').classList.remove('hidden');
+  document.body.classList.add('settings-open');
+  window.scrollTo(0, 0);
+  return loadSettingsIntoForm();
+}
+
+function closeSettings() {
+  $('settings-panel').classList.add('hidden');
+  document.body.classList.remove('settings-open');
+  refreshEmailWarning();
+}
+
 $('btn-settings').addEventListener('click', async () => {
-  const panel = $('settings-panel');
-  panel.classList.toggle('hidden');
-  if (!panel.classList.contains('hidden')) await loadSettingsIntoForm();
+  if ($('settings-panel').classList.contains('hidden')) await openSettings();
+  else closeSettings();
 });
 
-$('btn-close-settings').addEventListener('click', () => {
-  $('settings-panel').classList.add('hidden');
-});
+$('btn-close-settings').addEventListener('click', closeSettings);
 
 $('btn-save-settings').addEventListener('click', async () => {
   const intervalHours = parseInt($('setting-interval').value, 10);
@@ -69,11 +82,7 @@ $('btn-save-settings').addEventListener('click', async () => {
   await saveSettings({
     checkIntervalHours:  intervalHours,
     browserNotifications: $('setting-browser-notif').checked,
-    emailNotifications:   $('setting-email-notif').checked,
     emailAddress:         $('setting-email').value.trim(),
-    emailJsServiceId:     $('setting-emailjs-service').value.trim(),
-    emailJsTemplateId:    $('setting-emailjs-template').value.trim(),
-    emailJsPublicKey:     $('setting-emailjs-key').value.trim(),
   });
   chrome.runtime.sendMessage({ type: 'UPDATE_CHECK_INTERVAL', intervalHours });
 
@@ -82,16 +91,79 @@ $('btn-save-settings').addEventListener('click', async () => {
   setTimeout(() => saved.classList.add('hidden'), 1800);
 });
 
+// Flag an address that doesn't look like an email while it's being typed
+function refreshSettingsEmailWarning() {
+  const input = $('setting-email');
+  const bad   = input.value.trim() !== '' && !input.checkValidity();
+  const warn  = $('settings-email-warn');
+  warn.textContent = bad ? '⚠️ That doesn\'t look like a valid email address.' : '';
+  warn.classList.toggle('hidden', !bad);
+}
+
+$('setting-email').addEventListener('input', refreshSettingsEmailWarning);
+
+/** Returns a short description of what's missing for email alerts, or null if ready. */
+function emailSetupProblem(s) {
+  if (!s.emailAddress)        return 'No email address set.';
+  if (!isEmailConfigured())   return 'Email sending isn\'t set up in this build yet.';
+  return null;
+}
+
+$('sender-address').textContent = SENDER_ADDRESS;
+
 async function loadSettingsIntoForm() {
   const s = await getSettings();
   $('setting-interval').value          = String(s.checkIntervalHours);
   $('setting-browser-notif').checked   = s.browserNotifications;
-  $('setting-email-notif').checked     = s.emailNotifications;
   $('setting-email').value             = s.emailAddress || '';
-  $('setting-emailjs-service').value   = s.emailJsServiceId || '';
-  $('setting-emailjs-template').value  = s.emailJsTemplateId || '';
-  $('setting-emailjs-key').value       = s.emailJsPublicKey || '';
+  refreshSettingsEmailWarning();  const { [EMAIL_STATUS_KEY]: status } = await chrome.storage.local.get(EMAIL_STATUS_KEY);
+  renderEmailStatus(status);
 }
+
+// Last alert email's outcome — failures are otherwise invisible
+function renderEmailStatus(status) {
+  const el = $('email-status');
+  el.classList.toggle('hidden', !status);
+  if (!status) return;
+  el.className = status.ok ? 'email-status email-status--ok' : 'warn';
+  el.textContent = status.ok
+    ? `✓ Last email sent ${formatTimestamp(status.at)}`
+    : `⚠️ Last email failed ${formatTimestamp(status.at)}: ${status.error}`;
+}
+
+$('btn-test-email').addEventListener('click', async () => {
+  const btn = $('btn-test-email');
+  const email = $('setting-email').value.trim();
+  if (!email || !$('setting-email').checkValidity()) {
+    renderEmailStatus({ ok: false, error: 'Enter a valid email address first.', at: Date.now() });
+    return;
+  }
+  btn.disabled    = true;
+  btn.textContent = 'Sending…';
+  // Save first so the test goes to the address currently in the field
+  await saveSettings({ emailAddress: email });
+  let res;
+  try {
+    // EmailJS gets 15s in the worker; give up a little after that
+    res = await Promise.race([
+      chrome.runtime.sendMessage({ type: 'SEND_TEST_EMAIL' }),
+      new Promise(resolve => setTimeout(() => resolve({
+        ok: false, error: 'No response — try reloading the extension at chrome://extensions.',
+      }), 20_000)),
+    ]);
+  } catch (err) {
+    res = { ok: false, error: err.message };
+  }
+  if (!res) res = { ok: false, error: 'No response — try reloading the extension at chrome://extensions.' };
+  renderEmailStatus({ ...res, at: Date.now() });
+  if (res?.ok) {
+    $('email-status').textContent =
+      `✓ Test email sent to ${email}. Not in your inbox? Check spam, mark it "Not spam", ` +
+      `and add ${SENDER_ADDRESS} to your contacts.`;
+  }
+  btn.disabled    = false;
+  btn.textContent = 'Send test email';
+});
 
 // ─── State helpers ────────────────────────────────────────────────────────────
 
@@ -184,7 +256,8 @@ async function refreshTrackingUI() {
   const tracked = item !== null;
 
   if (tracked && currentProductData && currentProductData.price !== item.currentPrice) {
-    await recordPrice(currentItemId, currentProductData.price, currentProductData.inventory || item.inventory);
+    // Through the service worker, so a drop seen here still sends its alerts
+    await chrome.runtime.sendMessage({ type: 'PAGE_PRICE_UPDATE', data: currentProductData }).catch(() => {});
     item = await getItem(currentItemId);
   }
 
@@ -227,14 +300,21 @@ async function refreshTrackingUI() {
 
     // Notification toggles
     $('notif-settings').classList.remove('hidden');
-    $('toggle-browser').checked  = item.notifications?.browser ?? true;
-    $('toggle-email').checked    = item.notifications?.email   ?? false;
+    $('toggle-browser').checked      = item.notifications?.browser ?? true;
+    $('toggle-email-drop').checked   = wantsEmail(item, 'drop');
+    $('toggle-email-target').checked = wantsEmail(item, 'target');
     $('toggle-browser').onchange = async (e) => {
       await updateItemNotifications(currentItemId, { browser: e.target.checked });
     };
-    $('toggle-email').onchange = async (e) => {
-      await updateItemNotifications(currentItemId, { email: e.target.checked });
+    $('toggle-email-drop').onchange = async (e) => {
+      await updateItemNotifications(currentItemId, { emailDrop: e.target.checked });
+      await refreshEmailWarning();
     };
+    $('toggle-email-target').onchange = async (e) => {
+      await updateItemNotifications(currentItemId, { emailTarget: e.target.checked });
+      await refreshEmailWarning();
+    };
+    await refreshEmailWarning();
 
     // Target price
     const targetInput = $('target-price');
@@ -258,6 +338,22 @@ async function refreshTrackingUI() {
     $('verdict-badge').className = 'verdict hidden';
     $('notif-settings').classList.add('hidden');
   }
+}
+
+// Older items stored a single `email` flag — it now seeds both email options
+function wantsEmail(item, kind) {
+  const n = item.notifications || {};
+  return (kind === 'target' ? n.emailTarget : n.emailDrop) ?? n.email ?? false;
+}
+
+async function refreshEmailWarning() {
+  const warn = $('email-warn');
+  const anyOn = $('toggle-email-drop').checked || $('toggle-email-target').checked;
+  const msg = anyOn ? emailSetupProblem(await getSettings()) : null;
+  warn.classList.toggle('hidden', !msg);
+  if (!msg) return;
+  warn.innerHTML = `⚠️ ${escHtml(msg)} <a id="email-warn-link">Add your email</a> to get these.`;
+  $('email-warn-link').addEventListener('click', openSettings);
 }
 
 // Track / Untrack
@@ -301,7 +397,214 @@ $('btn-refresh').addEventListener('click', async () => {
   refreshBtn.disabled = false;
 });
 
+// ─── Drops tab ────────────────────────────────────────────────────────────────
+
+/**
+ * Recent price drops, newest first. Derived from each item's priceHistory —
+ * nothing extra is stored; the window only limits what's shown.
+ *
+ * Per item, the drops inside the window are combined: "was" is the price just
+ * before the earliest of them, "now" is the current price, and the row is
+ * dated by the latest. Items whose price has since climbed back to (or above)
+ * the "was" price are left out — that drop is over.
+ */
+function findRecentDrops(items, windowDays) {
+  const cutoff = Date.now() - windowDays * 86_400_000;
+  const drops  = [];
+
+  for (const item of Object.values(items)) {
+    const entries = (item.priceHistory || []).filter(h => h.type !== 'restock');
+    let wasPrice = null, lastDropAt = 0, count = 0;
+
+    for (let i = 1; i < entries.length; i++) {
+      const prev = entries[i - 1], cur = entries[i];
+      if (cur.timestamp < cutoff || cur.price >= prev.price) continue;
+      if (wasPrice == null) wasPrice = prev.price;
+      lastDropAt = cur.timestamp;
+      count++;
+    }
+
+    const now = item.currentPrice;
+    if (!count || now == null || now >= wasPrice) continue;
+    drops.push({ item, wasPrice, nowPrice: now, lastDropAt, count });
+  }
+
+  return drops.sort((a, b) => b.lastDropAt - a.lastDropAt);
+}
+
+// "Seen" cutoff as of when the tab was opened, so NEW marks survive filter changes
+let dropsSeenAtOnOpen = 0;
+
+async function openDropsTab() {
+  const settings = await getSettings();
+  dropsSeenAtOnOpen = settings.dropsSeenAt;
+  $('drops-window').value = String(settings.dropsWindowDays);
+  await renderDrops(dropsSeenAtOnOpen);
+  // Rows keep their "new" mark while the tab is open; next time they're seen
+  await saveSettings({ dropsSeenAt: Date.now() });
+  $('drops-new-count').classList.add('hidden');
+}
+
+async function renderDrops(seenAt) {
+  const windowDays = parseInt($('drops-window').value, 10);
+  const hideSold   = $('drops-hide-sold').checked;
+  const items      = await getAllItems();
+
+  let drops = findRecentDrops(items, windowDays);
+  if (hideSold) drops = drops.filter(d => d.item.inventory !== 'sold');
+
+  const list = $('drop-list');
+  list.innerHTML = '';
+  $('drops-empty').classList.toggle('hidden', drops.length > 0);
+  $('drops-empty-sub').textContent =
+    `None of your tracked items dropped in price in the last ${windowDays} days${hideSold ? ' (sold items hidden)' : ''}.`;
+
+  for (const d of drops) list.appendChild(buildDropRow(d, d.lastDropAt > seenAt));
+}
+
+function buildDropRow({ item, wasPrice, nowPrice, lastDropAt, count }, isNew) {
+  const row = document.createElement('div');
+  row.className = `drop-row${item.inventory === 'sold' ? ' drop-row--sold' : ''}`;
+
+  const img = document.createElement('img');
+  img.className = 'drop-row__img';
+  img.src       = item.image || '';
+  img.alt       = '';
+  img.onerror   = () => {
+    const ph = document.createElement('div');
+    ph.className   = 'drop-row__img img-placeholder';
+    ph.textContent = (item.brand || item.name || '?').charAt(0).toUpperCase();
+    img.replaceWith(ph);
+  };
+  row.appendChild(img);
+
+  const pct    = Math.round(((wasPrice - nowPrice) / wasPrice) * 100);
+  const status = item.inventory === 'sold' ? ' · Sold' : '';
+  const times  = count > 1 ? ` · ${count} drops` : '';
+
+  const body = document.createElement('div');
+  body.className = 'drop-row__body';
+  body.innerHTML = `
+    <div class="drop-row__brand">
+      ${isNew ? '<span class="drop-row__new">NEW</span>' : ''}
+      <span>${escHtml(item.brand || item.siteName)}</span>
+    </div>
+    <div class="drop-row__name">${escHtml(item.name)}</div>
+    <div class="drop-row__meta">${escHtml(item.siteName)} · ${formatTimestamp(lastDropAt)}${times}${status}</div>
+  `;
+  row.appendChild(body);
+
+  const prices = document.createElement('div');
+  prices.className = 'drop-row__prices';
+  prices.innerHTML = `
+    <span class="drop-row__now">${formatPrice(nowPrice, item.currency)}</span>
+    <span class="drop-row__was">${formatPrice(wasPrice, item.currency)}</span>
+    <span class="drop-row__pct">↓ ${pct}%</span>
+  `;
+  row.appendChild(prices);
+
+  row.addEventListener('click', () => chrome.tabs.create({ url: item.url }));
+  return row;
+}
+
+/** Tab badge: drops (within the window) the user hasn't seen yet. */
+async function updateDropsBadge() {
+  const [settings, items] = await Promise.all([getSettings(), getAllItems()]);
+  const unseen = findRecentDrops(items, settings.dropsWindowDays)
+    .filter(d => d.lastDropAt > settings.dropsSeenAt && d.item.inventory !== 'sold').length;
+  const badge = $('drops-new-count');
+  badge.textContent = String(unseen);
+  badge.classList.toggle('hidden', unseen === 0 || !$('panel-drops').classList.contains('hidden'));
+}
+
+$('drops-window').addEventListener('change', async () => {
+  await saveSettings({ dropsWindowDays: parseInt($('drops-window').value, 10) });
+  await renderDrops(dropsSeenAtOnOpen);
+});
+$('drops-hide-sold').addEventListener('change', () => renderDrops(dropsSeenAtOnOpen));
+
 // ─── Tracked items tab ────────────────────────────────────────────────────────
+
+// Refresh all tracked items — the service worker runs the job and stores its
+// progress; the popup only starts it and renders whatever is stored.
+$('btn-refresh-all').addEventListener('click', async () => {
+  $('btn-refresh-all').disabled = true;
+  try {
+    await chrome.runtime.sendMessage({ type: 'REFRESH_ALL' });
+  } catch {
+    $('btn-refresh-all').disabled = false;
+    $('refresh-all-status').textContent = 'Couldn\'t start refresh';
+  }
+});
+
+function renderRefreshJob(job) {
+  const btn      = $('btn-refresh-all');
+  const status   = $('refresh-all-status');
+  const progress = $('refresh-progress');
+  const running  = !!job?.running;
+
+  btn.disabled = running;
+  btn.classList.toggle('spinning', running);
+  $('btn-refresh-all-label').textContent = running ? 'Checking…' : 'Refresh all';
+  progress.classList.toggle('hidden', !running);
+
+  if (running) {
+    const pct = job.total ? Math.round((job.done / job.total) * 100) : 0;
+    $('refresh-progress-fill').style.width = `${pct}%`;
+    const now = job.current?.length ? ` · now: ${job.current.join(', ')}` : '';
+    $('refresh-progress-text').textContent = `${job.done} of ${job.total} checked${now}`;
+    status.textContent = '';
+  } else if (job?.finishedAt) {
+    const ok = job.total - job.failures.length;
+    status.textContent = job.total === 0
+      ? 'Nothing to check'
+      : `${ok}/${job.total} updated · ${formatTimestamp(job.finishedAt)}`;
+  } else {
+    status.textContent = '';
+  }
+
+  // Failures stay listed after the run so it's clear which items didn't update
+  const failures = job?.failures || [];
+  const failEl   = $('refresh-failures');
+  failEl.classList.toggle('hidden', failures.length === 0);
+  if (failures.length) {
+    $('refresh-failures-summary').textContent =
+      `${failures.length} item${failures.length !== 1 ? 's' : ''} couldn't be checked`;
+    $('refresh-failures-list').innerHTML = failures
+      .map(f => `<li><strong>${escHtml(f.name)}</strong> — ${escHtml(f.reason)}</li>`)
+      .join('');
+  }
+}
+
+async function initRefreshJob() {
+  const job = await getRefreshJob();
+  renderRefreshJob(job);
+  // If a run was cut off (browser closed, worker shut down), messaging the
+  // worker wakes it, and on wake it resumes the unfinished items.
+  if (job?.running) chrome.runtime.sendMessage({ type: 'PING' }).catch(() => {});
+}
+
+// Live updates: job progress, and item prices changing while the list is open
+let listRerenderTimer = null;
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== 'local') return;
+
+  if (changes[REFRESH_JOB_KEY]) renderRefreshJob(changes[REFRESH_JOB_KEY].newValue);
+
+  if (changes[ROOT_KEY]) {
+    updateDropsBadge();
+    if (!$('panel-drops').classList.contains('hidden')) renderDrops(dropsSeenAtOnOpen);
+  }
+
+  if (changes[ROOT_KEY] && !$('panel-tracked').classList.contains('hidden')) {
+    clearTimeout(listRerenderTimer);
+    listRerenderTimer = setTimeout(() => {
+      // Don't yank the list out from under a drag or an in-progress rename
+      if (dragItemId || document.activeElement?.classList.contains('folder-header__rename')) return;
+      renderTrackedList();
+    }, 400);
+  }
+});
 
 let dragItemId   = null;
 let dragSourceId = null;
@@ -509,10 +812,11 @@ function buildItemCard(item, folderId) {
   const firstPrice = item.priceHistory[0]?.price ?? item.currentPrice;
   const delta      = item.currentPrice - firstPrice;
   let deltaHtml    = '';
-  if (item.originalPrice && item.originalPrice > item.currentPrice) {
-    deltaHtml = `<span class="item-card__delta item-card__delta--drop">${formatDiscount(item.originalPrice, item.currentPrice)}</span>`;
-  } else if (delta < 0) {
+  // A drop since tracking started beats the store's MSRP discount
+  if (delta < 0) {
     deltaHtml = `<span class="item-card__delta item-card__delta--drop">↓ ${formatPrice(Math.abs(delta), item.currency)}</span>`;
+  } else if (item.originalPrice && item.originalPrice > item.currentPrice) {
+    deltaHtml = `<span class="item-card__delta item-card__delta--drop">${formatDiscount(item.originalPrice, item.currentPrice)}</span>`;
   } else if (delta > 0) {
     deltaHtml = `<span class="item-card__delta item-card__delta--rise">↑ ${formatPrice(delta, item.currency)}</span>`;
   }
@@ -619,5 +923,7 @@ function escHtml(str) {
 
 (async function boot() {
   await updateTrackedBadge();
+  updateDropsBadge();
+  initRefreshJob();
   await initCurrentTab();
 })();

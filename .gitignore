@@ -1,0 +1,3 @@
+# EmailJS keys — ship inside the extension but stay out of the public repo.
+# Copy utils/email-config.example.js to utils/email-config.js and fill it in.
+utils/email-config.js

@@ -26,7 +26,8 @@ export function formatPrice(price, currency = 'USD') {
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
     currency,
-    minimumFractionDigits: 0,
+    // $675 for whole amounts, $79.50 (never $79.5) otherwise
+    minimumFractionDigits: Number.isInteger(price) ? 0 : 2,
     maximumFractionDigits: 2,
   }).format(price);
 }
