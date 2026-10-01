@@ -19,6 +19,7 @@
  *     - therealreal  — consignment/unique items; low stock is a STRONG buy signal
  *     - fashionphile — consignment/resale; same as therealreal
  *     - theoutnet    — luxury outlet; limited stock, items don't restock; treated as consignment
+ *     - vestiairecollective — peer-to-peer resale; unique items, same as therealreal
  *     - ssense       — retail/potentially restockable; low stock is a moderate signal
  *
  *   Episode awareness:
@@ -82,7 +83,8 @@ export function analyzePriceTrend(item) {
   const inventory     = item.inventory;
   const site          = item.site;
   // Consignment/resale sites: unique items, low stock is a strong signal
-  const isConsignment = site === 'therealreal' || site === 'fashionphile' || site === 'theoutnet';
+  const isConsignment = site === 'therealreal' || site === 'fashionphile' ||
+                        site === 'theoutnet'   || site === 'vestiairecollective';
 
   // Already gone or not yet available — short-circuit
   if (inventory === 'sold' || inventory === 'out_of_stock') {

@@ -291,6 +291,73 @@ footer {
   color: var(--text-muted);
 }
 
+.feature a { color: var(--accent); }
+
+footer a { color: var(--text-muted); }
+footer a:hover { color: var(--accent); }
+
+a.logo { text-decoration: none; }
+
+/* ── Privacy policy ── */
+.policy {
+  max-width: 680px;
+  margin: 0 auto;
+  padding: 56px 24px 72px;
+}
+
+.policy h1 {
+  font-size: clamp(30px, 5vw, 40px);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  margin-bottom: 6px;
+}
+
+.policy-date {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-bottom: 28px;
+}
+
+.policy h2 {
+  font-size: 19px;
+  font-weight: 700;
+  margin: 36px 0 10px;
+}
+
+.policy p,
+.policy li {
+  font-size: 15px;
+  line-height: 1.7;
+}
+
+.policy p { margin-bottom: 12px; }
+
+.policy ul {
+  padding-left: 22px;
+  margin-bottom: 12px;
+}
+
+.policy li { margin-bottom: 6px; }
+
+.policy a { color: var(--accent); }
+
+.policy code {
+  font-size: 13px;
+  background: var(--accent-dim);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+.policy-summary {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px 20px;
+  box-shadow: var(--shadow);
+  font-size: 15px;
+  line-height: 1.65;
+}
+
 /* ── SEO ── */
 .seo-keywords {
   position: absolute;

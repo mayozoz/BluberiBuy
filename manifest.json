@@ -1,22 +1,22 @@
 {
   "manifest_version": 3,
   "name": "BluberiBuy",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Track price history on luxury fashion items. Get notified on price drops and low inventory.",
 
   "permissions": [
     "storage",
     "alarms",
     "notifications",
-    "activeTab",
-    "scripting"
+    "activeTab"
   ],
 
   "host_permissions": [
-    "https://www.ssense.com/*",
-    "https://www.therealreal.com/*",
-    "https://www.fashionphile.com/*",
-    "https://www.theoutnet.com/*"
+    "https://*.ssense.com/*",
+    "https://*.therealreal.com/*",
+    "https://*.fashionphile.com/*",
+    "https://*.theoutnet.com/*",
+    "https://*.vestiairecollective.com/*"
   ],
 
   "background": {
@@ -36,10 +36,13 @@
   "content_scripts": [
     {
       "matches": [
-        "https://www.ssense.com/*/product/*",
-        "https://www.therealreal.com/products/*",
-        "https://www.fashionphile.com/products/*",
-        "https://www.theoutnet.com/*/shop/product/*"
+        "https://*.ssense.com/*/product/*",
+        "https://*.therealreal.com/products/*",
+        "https://*.fashionphile.com/products/*",
+        "https://*.theoutnet.com/*/shop/product/*",
+        "https://*.theoutnet.com/*/products/*",
+        "https://*.vestiairecollective.com/*.shtml",
+        "https://*.vestiairecollective.com/*.shtml?*"
       ],
       "js": ["content/content.js"],
       "run_at": "document_idle"

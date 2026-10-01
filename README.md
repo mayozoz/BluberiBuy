@@ -2,7 +2,7 @@
 
 A Chrome extension for tracking price history on luxury fashion items and telling you the perfect time to buy.
 
-Works on **The RealReal**, **Fashionphile**, and **SSENSE**.
+Works on **The RealReal**, **Fashionphile**, **SSENSE**, **The Outnet**, and **Vestiaire Collective**.
 
 **[Install on the Chrome Web Store](https://chromewebstore.google.com/detail/bluberibuy/hebofgjcejgihignpbijmoicklaopijb)** · **[Landing Page](https://mayozoz.github.io/BluberiBuy/)**
 
@@ -99,12 +99,17 @@ Add to both `content_scripts[0].matches` and `host_permissions`:
 
 ## Email notifications
 
-Email alerts use [EmailJS](https://emailjs.com) — no backend required.
+Email alerts use [EmailJS](https://emailjs.com) — no backend required. The extension sends through one
+shared EmailJS account configured in `utils/email-config.js`; users only enter their address in Settings.
 
+Developer setup (once):
 1. Create a free EmailJS account and connect an email service (Gmail, Outlook, etc.)
-2. Create a template with these variables: `{{to_email}}`, `{{subject}}`, `{{item_name}}`, `{{message}}`, `{{item_url}}`
-3. In the extension Settings, enter your email address, Service ID, Template ID, and Public Key
-4. Enable email notifications globally, then toggle the envelope icon on individual items
+2. Create a template with To Email = `{{to_email}}`, Subject = `{{subject}}`, and `{{item_name}}`, `{{message}}`, `{{item_url}}` in the body
+3. `cp utils/email-config.example.js utils/email-config.js`, then paste the Service ID, Template ID, Public Key, and the sending address into it
+
+`utils/email-config.js` is gitignored so the keys stay out of this public repo, but the extension imports it — **create it before loading the extension**, or the background worker won't start. The keys still ship inside the published package (anyone can read them there), so keep EmailJS rate limiting on.
+
+Users then enter their email in Settings and turn on "Email on price drops" and/or "Email at target price" per item.
 
 ---
 
@@ -124,7 +129,7 @@ All data lives in `chrome.storage.local` under the key `bluberiBuy`.
       addedAt, lastChecked,
       isActive,         // false = paused
       isHidden,         // true = soft-deleted (history preserved)
-      notifications: { browser, email },
+      notifications: { browser, emailDrop, emailTarget },
       targetPrice,
       folderId
     }
@@ -132,11 +137,7 @@ All data lives in `chrome.storage.local` under the key `bluberiBuy`.
   settings: {
     checkIntervalHours,
     browserNotifications,
-    emailNotifications,
     emailAddress,
-    emailJsServiceId,
-    emailJsTemplateId,
-    emailJsPublicKey,
   },
   folders: {
     "<folderId>": { id, name, isDefault, order }

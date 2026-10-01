@@ -22,9 +22,53 @@
     </button>
   </header>
 
+  <!-- ── Settings panel (overlay) ─────────────────────────────────────────── -->
+  <section class="settings-panel hidden" id="settings-panel">
+    <div class="settings-panel__header">
+      <h2>Settings</h2>
+      <button class="icon-btn" id="btn-close-settings" aria-label="Close">✕</button>
+    </div>
+
+    <label class="field">
+      <span class="field__label">Check interval</span>
+      <select class="field__input" id="setting-interval">
+        <option value="1">Every hour</option>
+        <option value="3">Every 3 hours</option>
+        <option value="6" selected>Every 6 hours</option>
+        <option value="12">Every 12 hours</option>
+        <option value="24">Once a day</option>
+      </select>
+    </label>
+
+    <label class="field">
+      <span class="field__label">Browser notifications</span>
+      <label class="toggle">
+        <input type="checkbox" id="setting-browser-notif" checked />
+        <span class="toggle__track"></span>
+      </label>
+    </label>
+
+    <label class="field">
+      <span class="field__label">Email for alerts</span>
+      <input class="field__input" type="email" id="setting-email" placeholder="you@example.com" />
+      <p class="field__hint">Turn on email alerts per item from its page.</p>
+      <p class="field__hint">Alerts come from <strong id="sender-address"></strong> — add it to your contacts so they don't land in spam.</p>
+      <p class="warn hidden" id="settings-email-warn"></p>
+    </label>
+
+    <div class="field">
+      <button class="btn-refresh" id="btn-test-email" type="button">Send test email</button>
+      <p class="email-status hidden" id="email-status"></p>
+    </div>
+
+    <button class="btn btn--primary" id="btn-save-settings">Save settings</button>
+    <p class="settings-saved hidden" id="settings-saved">✓ Saved</p>
+  </section>
+
   <!-- ── Tab bar ──────────────────────────────────────────────────────────── -->
   <nav class="tabs" role="tablist">
     <button class="tab tab--active" data-tab="current" role="tab">This Item</button>
+    <button class="tab" data-tab="drops" role="tab">Drops <span class="badge hidden" id="drops-new-count"></span></button>
     <button class="tab" data-tab="tracked" role="tab">Tracked <span class="badge" id="tracked-count"></span></button>
   </nav>
 
@@ -39,7 +83,7 @@
     <div class="state hidden" id="state-unsupported">
       <p class="state__emoji">🔍</p>
       <p class="state__title">Not a supported product page</p>
-      <p class="state__sub">Navigate to a product on SSENSE, The RealReal, Fashionphile, or The Outnet, then open the extension.</p>
+      <p class="state__sub">Navigate to a product on SSENSE, The RealReal, Fashionphile, The Outnet, or Vestiaire Collective, then open the extension.</p>
     </div>
 
     <div class="state hidden" id="state-error">
@@ -128,10 +172,19 @@
         </div>
         <div class="notif-row">
           <div class="notif-row__label">
-            <span>📧</span><span>Email alerts</span>
+            <span>📧</span><span>Email on price drops</span>
           </div>
           <label class="toggle">
-            <input type="checkbox" id="toggle-email" />
+            <input type="checkbox" id="toggle-email-drop" />
+            <span class="toggle__track"></span>
+          </label>
+        </div>
+        <div class="notif-row">
+          <div class="notif-row__label">
+            <span>📧</span><span>Email at target price</span>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="toggle-email-target" />
             <span class="toggle__track"></span>
           </label>
         </div>
@@ -145,8 +198,36 @@
                  min="0" step="1" placeholder="e.g. 300" />
         </div>
 
+        <!-- Shown when an email toggle is on but email isn't set up -->
+        <p class="warn hidden" id="email-warn"></p>
+
       </div>
     </div><!-- /#state-product -->
+  </section>
+
+  <!-- ── Tab: recent price drops ─────────────────────────────────────────── -->
+  <section class="panel hidden" id="panel-drops">
+
+    <div class="sort-bar">
+      <select class="sort-select" id="drops-window">
+        <option value="7">Last 7 days</option>
+        <option value="14">Last 14 days</option>
+        <option value="30">Last 30 days</option>
+      </select>
+      <label class="filter-instock">
+        <input type="checkbox" id="drops-hide-sold" checked />
+        Hide sold
+      </label>
+    </div>
+
+    <div class="state hidden" id="drops-empty">
+      <p class="state__emoji">📉</p>
+      <p class="state__title">No price drops yet</p>
+      <p class="state__sub" id="drops-empty-sub"></p>
+    </div>
+
+    <div class="drop-list" id="drop-list"></div>
+
   </section>
 
   <!-- ── Tab: tracked items ────────────────────────────────────────────────── -->
@@ -174,80 +255,41 @@
 
     <!-- Folder toolbar -->
     <div class="folder-toolbar">
+      <span class="refresh-ts" id="refresh-all-status"></span>
+      <button class="btn-refresh" id="btn-refresh-all" title="Check every tracked item now">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+        </svg>
+        <span id="btn-refresh-all-label">Refresh all</span>
+      </button>
       <button class="btn-add-folder" id="btn-add-folder" title="New folder">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
         New folder
       </button>
     </div>
 
+    <!-- Refresh-all progress (driven by the stored RefreshJob) -->
+    <div class="refresh-progress hidden" id="refresh-progress">
+      <div class="refresh-progress__bar"><span id="refresh-progress-fill"></span></div>
+      <p class="refresh-progress__text" id="refresh-progress-text"></p>
+      <p class="refresh-progress__hint">You can close this — checking continues in the background.</p>
+    </div>
+
+    <details class="refresh-failures hidden" id="refresh-failures">
+      <summary id="refresh-failures-summary"></summary>
+      <ul id="refresh-failures-list"></ul>
+    </details>
+
     <div class="state hidden" id="tracked-empty">
       <p class="state__emoji">🛍️</p>
       <p class="state__title">No items tracked yet</p>
-      <p class="state__sub">Visit a product page on SSENSE, The RealReal, Fashionphile, or The Outnet and click "Track this item."</p>
+      <p class="state__sub">Visit a product page on SSENSE, The RealReal, Fashionphile, The Outnet, or Vestiaire Collective and click "Track this item."</p>
     </div>
 
     <div id="folder-list"></div>
 
   </section>
 
-  <!-- ── Settings panel (overlay) ─────────────────────────────────────────── -->
-  <section class="settings-panel hidden" id="settings-panel">
-    <div class="settings-panel__header">
-      <h2>Settings</h2>
-      <button class="icon-btn" id="btn-close-settings" aria-label="Close">✕</button>
-    </div>
-
-    <label class="field">
-      <span class="field__label">Check interval</span>
-      <select class="field__input" id="setting-interval">
-        <option value="1">Every hour</option>
-        <option value="3">Every 3 hours</option>
-        <option value="6" selected>Every 6 hours</option>
-        <option value="12">Every 12 hours</option>
-        <option value="24">Once a day</option>
-      </select>
-    </label>
-
-    <label class="field">
-      <span class="field__label">Browser notifications</span>
-      <label class="toggle">
-        <input type="checkbox" id="setting-browser-notif" checked />
-        <span class="toggle__track"></span>
-      </label>
-    </label>
-
-    <label class="field">
-      <span class="field__label">Email notifications</span>
-      <label class="toggle">
-        <input type="checkbox" id="setting-email-notif" />
-        <span class="toggle__track"></span>
-      </label>
-    </label>
-
-    <label class="field">
-      <span class="field__label">Email address</span>
-      <input class="field__input" type="email" id="setting-email" placeholder="you@example.com" />
-    </label>
-
-    <label class="field">
-      <span class="field__label">EmailJS Service ID</span>
-      <input class="field__input" type="text" id="setting-emailjs-service" placeholder="service_xxxxxxx" />
-    </label>
-
-    <label class="field">
-      <span class="field__label">EmailJS Template ID</span>
-      <input class="field__input" type="text" id="setting-emailjs-template" placeholder="template_xxxxxxx" />
-    </label>
-
-    <label class="field">
-      <span class="field__label">EmailJS Public Key</span>
-      <input class="field__input" type="text" id="setting-emailjs-key" placeholder="xxxxxxxxxxxxxxxxxxxx" />
-      <p class="field__hint">Free account at emailjs.com → Account → API Keys. Template vars: to_email, subject, item_name, message, item_url.</p>
-    </label>
-
-    <button class="btn btn--primary" id="btn-save-settings">Save settings</button>
-    <p class="settings-saved hidden" id="settings-saved">✓ Saved</p>
-  </section>
 
   <script type="module" src="popup.js"></script>
 </body>

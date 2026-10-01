@@ -32,19 +32,16 @@
  *   lastChecked:  number   — ms timestamp
  *   isActive:     boolean  — false = paused (won't background-check)
  *   notifications: {
- *     browser: boolean
- *     email:   boolean
+ *     browser:     boolean
+ *     emailDrop:   boolean  — email on price drops / inventory changes
+ *     emailTarget: boolean  — email when targetPrice is reached
  *   }
  * }
  *
  * Settings: {
  *   checkIntervalHours: number   — how often to background-check (default 6)
  *   browserNotifications: boolean
- *   emailNotifications:   boolean
- *   emailAddress:         string
- *   emailJsServiceId:     string
- *   emailJsTemplateId:    string
- *   emailJsPublicKey:     string
+ *   emailAddress:         string   — where email alerts go (EmailJS keys live in email-config.js)
  * }
  *
  * Folder: {
@@ -57,16 +54,14 @@
  * Items have folderId: string — set to site id by default, or any folder id.
  */
 
-const ROOT_KEY = 'bluberiBuy';
+export const ROOT_KEY = 'bluberiBuy';
 
 const DEFAULT_SETTINGS = {
   checkIntervalHours: 6,
+  dropsWindowDays: 14,   // Drops tab: how far back to show price drops
+  dropsSeenAt: 0,        // Drops tab: drops after this are marked 'new'
   browserNotifications: true,
-  emailNotifications: false,
   emailAddress: '',
-  emailJsServiceId: '',
-  emailJsTemplateId: '',
-  emailJsPublicKey: '',
 };
 
 // ─── Low-level read / write ───────────────────────────────────────────────────
@@ -77,6 +72,7 @@ const DEFAULT_FOLDERS = [
   { id: 'therealreal',  name: 'The RealReal',   isDefault: true, order: 1 },
   { id: 'fashionphile', name: 'Fashionphile',   isDefault: true, order: 2 },
   { id: 'theoutnet',    name: 'The Outnet',     isDefault: true, order: 3 },
+  { id: 'vestiairecollective', name: 'Vestiaire Collective', isDefault: true, order: 4 },
 ];
 
 async function _read() {
@@ -98,6 +94,21 @@ async function _write(data) {
   });
 }
 
+// ─── Write lock ───────────────────────────────────────────────────────────────
+
+// Every mutator reads the whole store, changes it, and writes it back. Running
+// two at once (e.g. parallel price checks) would let the later write erase the
+// earlier one, so mutators in this context run one at a time.
+let _lockChain = Promise.resolve();
+
+function locked(fn) {
+  return (...args) => {
+    const run = _lockChain.then(() => fn(...args));
+    _lockChain = run.catch(() => {});
+    return run;
+  };
+}
+
 // ─── Settings ─────────────────────────────────────────────────────────────────
 
 export async function getSettings() {
@@ -105,12 +116,12 @@ export async function getSettings() {
   return { ...DEFAULT_SETTINGS, ...data.settings };
 }
 
-export async function saveSettings(patch) {
+export const saveSettings = locked(async function saveSettings(patch) {
   const data = await _read();
   data.settings = { ...data.settings, ...patch };
   await _write(data);
   return data.settings;
-}
+});
 
 // ─── Tracked items ────────────────────────────────────────────────────────────
 
@@ -147,7 +158,7 @@ export async function isTracked(itemId) {
  *
  * @param {object} productData — as returned by the content script
  */
-export async function addItem(productData) {
+export const addItem = locked(async function addItem(productData) {
   const data = await _read();
   const now = Date.now();
   const inv = productData.inventory || 'unknown';
@@ -219,37 +230,37 @@ export async function addItem(productData) {
     lastChecked:  now,
     isActive:     true,
     isHidden:     false,
-    notifications: { browser: true, email: false },
+    notifications: { browser: true, emailDrop: false, emailTarget: false },
     targetPrice:  null,
   };
 
   data.trackedItems[item.id] = item;
   await _write(data);
   return item;
-}
+});
 
 /**
  * Soft-delete: mark item as hidden rather than destroying data.
  * If the user re-tracks the same URL, history is silently restored via addItem().
  */
-export async function removeItem(itemId) {
+export const removeItem = locked(async function removeItem(itemId) {
   const data = await _read();
   if (data.trackedItems[itemId]) {
     data.trackedItems[itemId].isHidden = true;
     data.trackedItems[itemId].isActive = false; // pause background checks
     await _write(data);
   }
-}
+});
 
-export async function setItemActive(itemId, isActive) {
+export const setItemActive = locked(async function setItemActive(itemId, isActive) {
   const data = await _read();
   if (data.trackedItems[itemId]) {
     data.trackedItems[itemId].isActive = isActive;
     await _write(data);
   }
-}
+});
 
-export async function updateItemNotifications(itemId, patch) {
+export const updateItemNotifications = locked(async function updateItemNotifications(itemId, patch) {
   const data = await _read();
   if (data.trackedItems[itemId]) {
     data.trackedItems[itemId].notifications = {
@@ -258,15 +269,24 @@ export async function updateItemNotifications(itemId, patch) {
     };
     await _write(data);
   }
-}
+});
 
-export async function setTargetPrice(itemId, price) {
+export const setTargetPrice = locked(async function setTargetPrice(itemId, price) {
   const data = await _read();
   if (data.trackedItems[itemId]) {
     data.trackedItems[itemId].targetPrice = price;
     await _write(data);
   }
-}
+});
+
+/** Point an item at a new product URL (e.g. after the store moved the page). */
+export const setItemUrl = locked(async function setItemUrl(itemId, url) {
+  const data = await _read();
+  if (data.trackedItems[itemId]) {
+    data.trackedItems[itemId].url = url;
+    await _write(data);
+  }
+});
 
 // ─── Folders ──────────────────────────────────────────────────────────────────
 
@@ -284,7 +304,7 @@ export async function getFolders() {
 }
 
 /** Create a new user folder. Returns the new folder object. */
-export async function addFolder(name) {
+export const addFolder = locked(async function addFolder(name) {
   const data = await _read();
   const id   = `folder_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
   const order = Object.keys(data.folders).length + DEFAULT_FOLDERS.length;
@@ -292,10 +312,10 @@ export async function addFolder(name) {
   data.folders[id] = folder;
   await _write(data);
   return folder;
-}
+});
 
 /** Rename any folder (including defaults). */
-export async function renameFolder(folderId, newName) {
+export const renameFolder = locked(async function renameFolder(folderId, newName) {
   const data = await _read();
   // Ensure default folders exist in storage before renaming
   for (const f of DEFAULT_FOLDERS) {
@@ -305,13 +325,13 @@ export async function renameFolder(folderId, newName) {
     data.folders[folderId].name = newName;
     await _write(data);
   }
-}
+});
 
 /**
  * Delete a user-created folder.
  * Items in this folder are reassigned to their site's default folder.
  */
-export async function removeFolder(folderId) {
+export const removeFolder = locked(async function removeFolder(folderId) {
   const data = await _read();
   const folder = data.folders[folderId] || DEFAULT_FOLDERS.find(f => f.id === folderId);
   if (!folder || folder.isDefault) return; // can't delete default folders
@@ -325,22 +345,22 @@ export async function removeFolder(folderId) {
     }
   }
   await _write(data);
-}
+});
 
 /** Move an item to a different folder. */
-export async function setItemFolder(itemId, folderId) {
+export const setItemFolder = locked(async function setItemFolder(itemId, folderId) {
   const data = await _read();
   if (data.trackedItems[itemId]) {
     data.trackedItems[itemId].folderId = folderId;
     await _write(data);
   }
-}
+});
 
 /**
  * Record a new price observation for an item.
  * Returns { prevPrice, newPrice, dropped: boolean, change: number } or null if item not found.
  */
-export async function recordPrice(itemId, newPrice, inventory = 'unknown') {
+export const recordPrice = locked(async function recordPrice(itemId, newPrice, inventory = 'unknown') {
   const data = await _read();
   const item = data.trackedItems[itemId];
   if (!item) return null;
@@ -367,8 +387,9 @@ export async function recordPrice(itemId, newPrice, inventory = 'unknown') {
   }
 
   // Update high / low watermarks
-  if (newPrice > item.highPrice) item.highPrice = newPrice;
-  if (newPrice < item.lowPrice)  item.lowPrice  = newPrice;
+  // (null after a history cleanup left no trustworthy price — see cleanCorruptedHistory)
+  if (item.highPrice == null || newPrice > item.highPrice) item.highPrice = newPrice;
+  if (item.lowPrice  == null || newPrice < item.lowPrice)  item.lowPrice  = newPrice;
 
   item.currentPrice = newPrice;
   item.inventory    = inventory;
@@ -383,4 +404,145 @@ export async function recordPrice(itemId, newPrice, inventory = 'unknown') {
     dropped: newPrice < prevPrice,
     change:  newPrice - prevPrice,
   };
+});
+
+// ─── Item id migration ────────────────────────────────────────────────────────
+
+/** Same hash as generateItemId() in content/content.js — keep them in sync. */
+function itemIdForUrl(url) {
+  const canonical = url.split('?')[0].split('#')[0].replace(/\/$/, '').replace('://www.', '://');
+  let hash = 0;
+  for (let i = 0; i < canonical.length; i++) {
+    hash = Math.imul(31, hash) + canonical.charCodeAt(i) | 0;
+  }
+  return Math.abs(hash).toString(36);
+}
+
+/**
+ * Re-key stored items whose id was made with an older URL canonicalization
+ * (ids used to include "www.", so a site moving to its bare domain made the
+ * product page stop matching the saved item). Safe to run repeatedly.
+ */
+export const migrateItemIds = locked(async function migrateItemIds() {
+  const data = await _read();
+  let changed = 0;
+  for (const [oldId, item] of Object.entries(data.trackedItems)) {
+    if (!item.url) continue;
+    const newId = itemIdForUrl(item.url);
+    if (newId === oldId || data.trackedItems[newId]) continue;
+    delete data.trackedItems[oldId];
+    data.trackedItems[newId] = { ...item, id: newId };
+    changed++;
+  }
+  if (changed) await _write(data);
+  return changed;
+});
+
+// ─── One-time data repairs ────────────────────────────────────────────────────
+
+const MIGRATIONS_KEY = 'bluberiBuy_migrations';
+
+// Product-page URL shapes per site (mirrors productPath in content/content.js)
+const PRODUCT_PATHS = {
+  ssense:              /\/product\//,
+  therealreal:         /^\/products\//,
+  fashionphile:        /^\/products\//,
+  theoutnet:           /\/(shop\/product|products)\//,
+  vestiairecollective: /\.shtml$/,
+};
+
+/**
+ * Repair price data recorded by two old content-script bugs. Runs once.
+ *
+ *  1. Sold Fashionphile pages have no price in their JSON-LD, so the CSS
+ *     fallback read a *recommended* item's price and recorded it as
+ *     out_of_stock (e.g. a $3,995 bag logged at $120). Fashionphile items are
+ *     one-of-a-kind and are now read as "sold", so every Fashionphile
+ *     out_of_stock entry came from that bug — drop them.
+ *  2. On SSENSE the script stayed alive on listing pages and could track a
+ *     listing URL as an item. Those items are hidden (soft-deleted).
+ *
+ * Watermarks and current price are rebuilt from the remaining history. Items
+ * left with no trustworthy price get null prices and are returned so the
+ * caller can re-check them.
+ */
+export const cleanCorruptedHistory = locked(async function cleanCorruptedHistory() {
+  const { [MIGRATIONS_KEY]: done = {} } = await chrome.storage.local.get(MIGRATIONS_KEY);
+  if (done.cleanCorruptedHistory) return { recheck: [], fixed: 0, hidden: 0 };
+
+  const data    = await _read();
+  const recheck = [];
+  let fixed = 0, hidden = 0;
+
+  for (const item of Object.values(data.trackedItems)) {
+    let path = '';
+    try { path = new URL(item.url).pathname; } catch {}
+    const productPath = PRODUCT_PATHS[item.site];
+    if (productPath && !productPath.test(path) && !item.isHidden) {
+      item.isHidden = true;
+      item.isActive = false;
+      hidden++;
+      continue;
+    }
+
+    if (item.site !== 'fashionphile') continue;
+    const before = item.priceHistory.length;
+    item.priceHistory = item.priceHistory.filter(h => h.inventory !== 'out_of_stock');
+    if (item.priceHistory.length === before) continue;
+    fixed++;
+
+    // Restock markers only make sense after a real entry
+    while (item.priceHistory[0]?.type === 'restock') item.priceHistory.shift();
+
+    const real = item.priceHistory.filter(h => h.type !== 'restock');
+    if (real.length) {
+      const last        = real[real.length - 1];
+      item.currentPrice = last.price;
+      item.inventory    = last.inventory;
+      item.highPrice    = Math.max(...real.map(h => h.price));
+      item.lowPrice     = Math.min(...real.map(h => h.price));
+    } else {
+      item.currentPrice = null;
+      item.highPrice    = null;
+      item.lowPrice     = null;
+      item.inventory    = 'unknown';
+      recheck.push(item.id);
+    }
+  }
+
+  await _write(data);
+  await chrome.storage.local.set({ [MIGRATIONS_KEY]: { ...done, cleanCorruptedHistory: Date.now() } });
+  return { recheck, fixed, hidden };
+});
+
+// ─── Refresh-all job ──────────────────────────────────────────────────────────
+
+/**
+ * Progress of the current / last "check every item" run, kept under its own
+ * key so the popup can watch it via chrome.storage.onChanged.
+ *
+ * RefreshJob: {
+ *   running:    boolean
+ *   total:      number
+ *   done:       number             — checked so far, including failures
+ *   pending:    string[]           — item ids not finished yet (used to resume)
+ *   current:    string[]           — names of items being checked right now
+ *   failures:   Array<{ id, name, reason }>
+ *   startedAt:  number
+ *   updatedAt:  number
+ *   finishedAt: number | null
+ * }
+ */
+export const REFRESH_JOB_KEY = 'bluberiBuy_refreshJob';
+
+/** Outcome of the most recent alert email: { ok, error?, at }. */
+export const EMAIL_STATUS_KEY = 'bluberiBuy_emailStatus';
+
+export async function getRefreshJob() {
+  const result = await chrome.storage.local.get(REFRESH_JOB_KEY);
+  return result[REFRESH_JOB_KEY] || null;
+}
+
+export async function saveRefreshJob(job) {
+  await chrome.storage.local.set({ [REFRESH_JOB_KEY]: job });
 }

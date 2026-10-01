@@ -26,6 +26,7 @@ const SITE_CONFIGS = {
   'ssense.com': {
     name:        'ssense',
     displayName: 'SSENSE',
+    productPath: /\/product\//,  // pages this matches are product pages; anything else is ignored
     currency:    'USD',
     selectors: {
       price:   ['[data-testid="price"]', '.pdp__price', '[class*="finalPrice"]', '[class*="price-final"]', 'span[class*="Price"]'],
@@ -39,6 +40,8 @@ const SITE_CONFIGS = {
   'therealreal.com': {
     name:        'therealreal',
     displayName: 'The RealReal',
+    resale:      true,
+    productPath: /^\/products\//,  // pages this matches are product pages; anything else is ignored
     currency:    'USD',
     selectors: {
       price:   ['[data-testid="price"]', '[class*="product-price"]', '[class*="ProductPrice"]', '[class*="Price"]'],
@@ -56,6 +59,7 @@ const SITE_CONFIGS = {
   'theoutnet.com': {
     name:        'theoutnet',
     displayName: 'The Outnet',
+    productPath: /\/(shop\/product|products)\//,  // pages this matches are product pages; anything else is ignored
     currency:    'USD',
     selectors: {
       price:   ['[class*="__value"] span[content]', '[class*="__value"]'],
@@ -72,6 +76,8 @@ const SITE_CONFIGS = {
   'fashionphile.com': {
     name:        'fashionphile',
     displayName: 'Fashionphile',
+    resale:      true,
+    productPath: /^\/products\//,  // pages this matches are product pages; anything else is ignored
     currency:    'USD',
     selectors: {
       price:   ['.price-item--sale', '.price-item--regular', '.price-item'],
@@ -83,13 +89,37 @@ const SITE_CONFIGS = {
     },
   },
 
+  // Vestiaire Collective: peer-to-peer luxury resale, one-of-a-kind items.
+  // Next.js site — the product lives in the __NEXT_DATA__ JSON (see
+  // extractVestiaire), which also says whether it has sold. Regional
+  // subdomains (us., uk., fr., …) price in their own currency.
+  'vestiairecollective.com': {
+    name:        'vestiairecollective',
+    displayName: 'Vestiaire Collective',
+    resale:      true,
+    productPath: /\.shtml$/,  // pages this matches are product pages; anything else is ignored
+    currency:    'USD',
+    extract:     () => extractVestiaire(),
+    selectors: {
+      price:   ['[data-cy="product_price"]', '[class*="productPrice"]', '[class*="price"]'],
+      name:    ['[data-cy="product_title"]', 'h1'],
+      brand:   ['[data-cy="product_brand"]', '[class*="brand"] a', '[class*="brand"]'],
+      image:   ['[class*="productImage"] img', '[class*="gallery"] img', 'main img'],
+      soldOut: ['[data-cy*="sold"]', '[class*="sold"]', '[class*="Sold"]'],
+    },
+  },
+
 };
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 
-/** Stable numeric hash of a URL (strips query params and trailing slash). */
+/**
+ * Stable numeric hash of a URL (strips query params, trailing slash, and a
+ * leading "www." so www/bare-domain redirects map to the same item).
+ * Keep in sync with itemIdForUrl() in utils/storage.js.
+ */
 function generateItemId(url) {
-  const canonical = url.split('?')[0].split('#')[0].replace(/\/$/, '');
+  const canonical = url.split('?')[0].split('#')[0].replace(/\/$/, '').replace('://www.', '://');
   let hash = 0;
   for (let i = 0; i < canonical.length; i++) {
     hash = Math.imul(31, hash) + canonical.charCodeAt(i) | 0;
@@ -140,30 +170,40 @@ const ORIGINAL_PRICE_SELECTORS = [
  *   1. offers.priceSpecification[] with priceType = ListPrice / SRP
  *   2. offers.highPrice (some retailers put MSRP here)
  */
-function extractFromJsonLd() {
+function extractFromJsonLd(config) {
   const scripts = document.querySelectorAll('script[type="application/ld+json"]');
   const pagePath = window.location.pathname.replace(/\/$/, '');
-  let fallback = null;
+  let fallback   = null;
+  let soldNode   = null;   // Product listed with no offer — typical of a sold item
 
   for (const script of scripts) {
     let parsed;
     try { parsed = JSON.parse(script.textContent); } catch { continue; }
 
-    const candidates = Array.isArray(parsed) ? parsed : [parsed];
+    const candidates = (Array.isArray(parsed) ? parsed : [parsed])
+      .flatMap(node => node?.['@graph'] ?? [node]);
+
     for (const node of candidates) {
-      if (node['@type'] !== 'Product') continue;
+      const type = node?.['@type'];
+      if (type !== 'Product' && !(Array.isArray(type) && type.includes('Product'))) continue;
 
-      const offer = Array.isArray(node.offers) ? node.offers[0] : node.offers;
-      const price = offer ? parseFloat(offer.price) : null;
-      if (!price) continue;
+      const offers = flattenOffers(node.offers);
+      const buyable = offers.find(o => /instock|limitedavail/i.test(o.availability || ''));
+      const offer   = buyable || offers[0];
+      const price   = toPrice(offer?.price ?? offer?.lowPrice);
+      if (!price) {
+        if (!soldNode) soldNode = node;
+        continue;
+      }
 
-      const availability = (offer?.availability || '').toLowerCase();
+      // Stock across all offers (one per size on multi-size listings)
+      const avails = offers.map(o => String(o.availability || '').toLowerCase());
       let inventory = 'unknown';
-      if (availability.includes('outofstock'))                          inventory = 'out_of_stock';
-      else if (availability.includes('limitedavail'))                  inventory = 'low';
-      else if (availability.includes('instock'))                       inventory = 'in_stock';
-      else if (availability.includes('preorder') ||
-               availability.includes('presale'))                       inventory = 'coming_soon';
+      if      (avails.some(a => a.includes('instock')))                          inventory = 'in_stock';
+      else if (avails.some(a => a.includes('limitedavail')))                     inventory = 'low';
+      else if (avails.some(a => a.includes('preorder') || a.includes('presale'))) inventory = 'coming_soon';
+      else if (avails.some(a => a.includes('discontinued')))                     inventory = 'sold';
+      else if (avails.some(a => a.includes('outofstock') || a.includes('soldout'))) inventory = 'out_of_stock';
 
       // Look for the original / list price in priceSpecification
       let originalPrice = null;
@@ -174,11 +214,11 @@ function extractFromJsonLd() {
         const listSpec = specs.find(s =>
           /ListPrice|SuggestedRetailPrice|RegularPrice/i.test(s.priceType || '')
         );
-        if (listSpec) originalPrice = parseFloat(listSpec.price) || null;
+        if (listSpec) originalPrice = toPrice(listSpec.price);
       }
       // Fallback: offers.highPrice (non-standard but used by some retailers)
       if (!originalPrice && offer?.highPrice) {
-        const hp = parseFloat(offer.highPrice);
+        const hp = toPrice(offer.highPrice);
         if (hp > price) originalPrice = hp;
       }
 
@@ -200,7 +240,92 @@ function extractFromJsonLd() {
       if (!fallback) fallback = result;
     }
   }
-  return fallback;
+  if (fallback) return fallback;
+
+  // The page describes a product but with no price in its offer — Fashionphile
+  // does this once an item sells. Its last price is still in the Open Graph
+  // tags. The page's visible prices belong to *recommended* items, so never
+  // fall back to CSS selectors here (that's how sold items used to pick up a
+  // stranger's $120 price).
+  if (soldNode) {
+    const meta = document.querySelector(
+      'meta[property="og:price:amount"], meta[property="product:price:amount"]'
+    );
+    const price = toPrice(meta?.content);
+    if (!price) return { unreadable: true };
+    return {
+      name:          soldNode.name || '',
+      brand:         soldNode.brand?.name || '',
+      price,
+      originalPrice: null,
+      currency:      document.querySelector('meta[property="og:price:currency"]')?.content || 'USD',
+      image:         (Array.isArray(soldNode.image) ? soldNode.image[0] : soldNode.image) || '',
+      inventory:     config.resale ? 'sold' : 'out_of_stock',
+    };
+  }
+  return null;
+}
+
+// offers may be a single Offer, an array, or an AggregateOffer wrapping more offers
+function flattenOffers(offers) {
+  if (!offers) return [];
+  return (Array.isArray(offers) ? offers : [offers]).flatMap(o =>
+    o?.offers ? [o, ...flattenOffers(o.offers)] : [o]
+  ).filter(Boolean);
+}
+
+// "4,045.00" → 4045; null for missing / unparseable / non-positive values
+function toPrice(value) {
+  if (value == null) return null;
+  const n = parseFloat(String(value).replace(/,/g, ''));
+  return isNaN(n) || n <= 0 ? null : n;
+}
+
+/**
+ * Vestiaire Collective: read the product from Next.js's __NEXT_DATA__ JSON.
+ * Expected at props.pageProps.product; if the site reshuffles its props we
+ * search for any object shaped like a product (name + price.cents).
+ */
+function extractVestiaire() {
+  const script = document.getElementById('__NEXT_DATA__');
+  if (!script) return null;
+
+  let data;
+  try { data = JSON.parse(script.textContent); } catch { return null; }
+
+  const product = data?.props?.pageProps?.product || findVestiaireProduct(data);
+  if (!product) return null;
+
+  const cents = Number(product.price?.cents);
+  if (!cents) return null;
+
+  let inventory = 'in_stock';
+  if (product.sold)                                         inventory = 'sold';
+  else if (product.reserved)                                inventory = 'low';
+  else if (product.inStock === false || product.available === false) inventory = 'out_of_stock';
+
+  const ogImage = document.querySelector('meta[property="og:image"]')?.content;
+  const picture = product.pictures?.[0]?.path;
+
+  return {
+    name:          product.name || document.title,
+    brand:         product.brand?.name || '',
+    price:         cents / 100,
+    originalPrice: null,
+    currency:      product.price?.currency || 'USD',
+    image:         ogImage || (picture?.startsWith('http') ? picture : ''),
+    inventory,
+  };
+}
+
+function findVestiaireProduct(node, depth = 0) {
+  if (!node || typeof node !== 'object' || depth > 8) return null;
+  if (node.name && node.price?.cents != null) return node;
+  for (const value of Object.values(node)) {
+    const found = findVestiaireProduct(value, depth + 1);
+    if (found) return found;
+  }
+  return null;
 }
 
 /**
@@ -245,15 +370,23 @@ function getCurrentSiteConfig() {
   return null;
 }
 
+/**
+ * True only on a product page. SPAs (SSENSE) keep this script alive while the
+ * user browses listing pages; reading one of those would track the listing
+ * URL as if it were whichever product rendered first.
+ */
+function isProductPage(config = getCurrentSiteConfig()) {
+  return !!config && (!config.productPath || config.productPath.test(window.location.pathname));
+}
+
 function extractProductData() {
   const config = getCurrentSiteConfig();
-  if (!config) return null;
+  if (!config || !isProductPage(config)) return null;
 
-  // Try JSON-LD first; fall back to DOM selectors
-  const fromLd  = extractFromJsonLd();
-  const product  = fromLd || extractFromSelectors(config);
+  // Site-specific extractor (if any), then JSON-LD, then DOM selectors
+  const product = config.extract?.() || extractFromJsonLd(config) || extractFromSelectors(config);
 
-  if (!product || !product.price) return null;
+  if (!product || product.unreadable || !product.price) return null;
 
   return {
     ...product,
@@ -272,6 +405,11 @@ function extractProductData() {
  */
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type !== 'GET_PRODUCT_DATA') return false;
+
+  if (!isProductPage()) {
+    sendResponse({ success: false, error: 'This isn\'t a product page. Open a single item to track it.' });
+    return false;
+  }
 
   // Retry up to 5 times at 700ms intervals to handle SPAs (React, etc.) that
   // render product content after document_idle fires.
@@ -294,9 +432,24 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   return true; // Keep the message channel open for async sendResponse
 });
 
-// ─── Auto-update on navigation (SPAs) ─────────────────────────────────────────
-// Some sites (SSENSE) are SPAs — the URL changes without a full page reload.
-// We notify the background worker whenever the URL changes so it can update the price.
+// ─── Report the live price to the background worker ───────────────────────────
+// Every visit to a product page is a free price check: the worker records it
+// (if the item is tracked) and sends any drop / target / stock alerts.
+
+function reportPrice(retriesLeft = 5) {
+  const data = extractProductData();
+  if (data) {
+    chrome.runtime.sendMessage({ type: 'PAGE_PRICE_UPDATE', data }).catch(() => {});
+  } else if (retriesLeft > 0) {
+    // SPAs may render the product after document_idle
+    setTimeout(() => reportPrice(retriesLeft - 1), 700);
+  }
+}
+
+reportPrice();
+
+// Some sites (SSENSE) are SPAs — the URL changes without a full page reload,
+// so report again whenever it does.
 
 let lastUrl = window.location.href;
 
@@ -304,12 +457,7 @@ const observer = new MutationObserver(() => {
   if (window.location.href !== lastUrl) {
     lastUrl = window.location.href;
     // Small delay to let the new page's DOM render
-    setTimeout(() => {
-      const data = extractProductData();
-      if (data) {
-        chrome.runtime.sendMessage({ type: 'PAGE_PRICE_UPDATE', data });
-      }
-    }, 1500);
+    setTimeout(() => reportPrice(), 1500);
   }
 });
 
